@@ -23,6 +23,12 @@ tags:
   - name: staff
     summary: 员工
     description: 员工账号、会话、角色权限、操作日志（internal/modules/staff）
+  - name: products
+    summary: 商品
+    description: 商品的创建、改价、调库存（internal/modules/product）
+  - name: orders
+    summary: 订单
+    description: 订单查看，只读（internal/modules/order）
   - name: users
     summary: "用户"
     description: "前台用户。账号由登录创建，后台只能查看、停用和启用（internal/modules/auth）"
@@ -559,6 +565,222 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+
+  /products:
+    get:
+      operationId: listProducts
+      tags: [products]
+      summary: 商品列表
+      description: 按创建时间倒序，页码分页。直接读库、不走缓存，改价和调库存后立刻能看到。
+      x-permission: product:read
+      parameters:
+        - name: q
+          in: query
+          required: false
+          description: 名称包含这个关键字（不区分大小写）
+          schema:
+            type: string
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/Size"
+      responses:
+        "200":
+          description: 商品列表
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProductPage"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    post:
+      operationId: createProduct
+      tags: [products]
+      summary: 创建商品
+      x-permission: product:create
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateProductRequest"
+      responses:
+        "201":
+          description: 已创建
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Product"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /products/{id}:
+    get:
+      operationId: getProduct
+      tags: [products]
+      summary: 商品详情
+      description: 直接读库、不经过缓存：编辑冲突后要拿到最新的 version。
+      x-permission: product:read
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      responses:
+        "200":
+          description: 商品
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Product"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    put:
+      operationId: updateProduct
+      tags: [products]
+      summary: 修改商品名称和单价
+      description: |
+        改价只影响之后的订单：订单保存了下单时的名称和单价。库存用调整库存接口改。请求带上读到的
+        version，打开表单之后别人改过这个商品时返回 409 product_conflict，不覆盖别人的修改。
+      x-permission: product:update
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateProductRequest"
+      responses:
+        "200":
+          description: 修改后的商品
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Product"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /products/{id}/stock-adjustments:
+    post:
+      operationId: adjustProductStock
+      tags: [products]
+      summary: 调整库存
+      description: |
+        库存加上 delta（进货为正，盘亏为负），与下单扣减并发也不会丢更新。不提供"设为某个值"：
+        它会覆盖同时发生的下单扣减。调整后库存不能小于 0（insufficient_stock）或超过
+        1000000000（stock_too_large），这时不做任何修改。
+      x-permission: product:adjust_stock
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdjustStockRequest"
+      responses:
+        "200":
+          description: 调整后的商品
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Product"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /orders:
+    get:
+      operationId: listOrders
+      tags: [orders]
+      summary: 订单列表
+      description: 按下单时间倒序，页码分页。时间范围是半开区间 [from, to)。
+      x-permission: order:read
+      parameters:
+        - name: status
+          in: query
+          required: false
+          description: 订单状态，多个用逗号分隔，满足任一即可
+          style: form
+          explode: false
+          schema:
+            type: array
+            items:
+              $ref: "#/components/schemas/OrderStatus"
+        - name: from
+          in: query
+          required: false
+          description: 下单时间起（含）
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          required: false
+          description: 下单时间止（不含）
+          schema:
+            type: string
+            format: date-time
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/Size"
+      responses:
+        "200":
+          description: 订单列表
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrderPage"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /orders/{id}:
+    get:
+      operationId: getOrder
+      tags: [orders]
+      summary: 订单详情
+      x-permission: order:read
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      responses:
+        "200":
+          description: 订单
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Order"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
 
   /users:
     get:
@@ -1347,6 +1569,214 @@ components:
           title: 超过上限
           type: boolean
           description: 为 true 时实际条数超过 10000，页面显示"10000+"
+
+    Product:
+      type: object
+      required: [id, name, price_cents, stock, version, created_at, updated_at]
+      properties:
+        id:
+          title: ID
+          examples: ["01936f3e-8a2b-7c4d-9e5f-0a1b2c3d4e5f"]
+          type: string
+          format: uuid
+          x-go-type: string
+        name:
+          title: 名称
+          examples: ["机械键盘"]
+          type: string
+        price_cents:
+          title: 单价
+          x-field: money
+          examples: [39900]
+          type: integer
+          format: int64
+          description: 单价，单位：分
+        stock:
+          title: 库存
+          examples: [100]
+          type: integer
+          format: int64
+        version:
+          title: 版本号
+          examples: [3]
+          type: integer
+          format: int64
+          description: 版本号，修改商品时原样带回；调库存不改变它
+        created_at:
+          title: 创建时间
+          type: string
+          format: date-time
+        updated_at:
+          title: 更新时间
+          type: string
+          format: date-time
+
+    ProductPage:
+      allOf:
+        - $ref: "#/components/schemas/PageTotal"
+        - type: object
+          required: [items]
+          properties:
+            items:
+              title: 商品
+              type: array
+              items:
+                $ref: "#/components/schemas/Product"
+
+    CreateProductRequest:
+      type: object
+      required: [name, price_cents, stock]
+      properties:
+        name:
+          title: 名称
+          examples: ["机械键盘"]
+          type: string
+          maxLength: 200
+          x-oapi-codegen-extra-tags:
+            validate: "required,max=200"
+        price_cents:
+          title: 单价
+          x-field: money
+          examples: [39900]
+          type: integer
+          format: int64
+          description: 单价，单位：分，不用小数
+          minimum: 1
+          x-oapi-codegen-extra-tags:
+            validate: "required,gt=0"
+        stock:
+          title: 初始库存
+          examples: [100]
+          type: integer
+          format: int64
+          minimum: 0
+          maximum: 1000000000
+          x-oapi-codegen-extra-tags:
+            validate: "gte=0,lte=1000000000"
+
+    UpdateProductRequest:
+      type: object
+      required: [name, price_cents, version]
+      properties:
+        name:
+          title: 名称
+          examples: ["机械键盘"]
+          type: string
+          maxLength: 200
+          x-oapi-codegen-extra-tags:
+            validate: "required,max=200"
+        price_cents:
+          title: 单价
+          x-field: money
+          examples: [39900]
+          type: integer
+          format: int64
+          description: 单价，单位：分
+          minimum: 1
+          x-oapi-codegen-extra-tags:
+            validate: "required,gt=0"
+        version:
+          title: 版本号
+          examples: [3]
+          type: integer
+          format: int64
+          description: 打开编辑表单时商品的 version；已经不是最新时返回 409 product_conflict
+          minimum: 1
+          x-oapi-codegen-extra-tags:
+            validate: "required,gt=0"
+
+    AdjustStockRequest:
+      type: object
+      required: [delta]
+      properties:
+        delta:
+          title: 增减量
+          examples: [50]
+          type: integer
+          format: int64
+          description: 库存增减量，进货为正、盘亏为负，不能为 0
+          minimum: -1000000000
+          maximum: 1000000000
+          x-oapi-codegen-extra-tags:
+            validate: "required,ne=0,gte=-1000000000,lte=1000000000"
+
+    OrderStatus:
+      type: string
+      x-enum-labels:
+        pending: 处理中
+        confirmed: 已确认
+        failed: 失败
+      enum: [pending, confirmed, failed]
+      description: pending 处理中（异步扣库存）；confirmed 已扣库存；failed 处理失败（如库存不足）
+
+    Order:
+      type: object
+      required: [id, customer_name, product_id, product_name, quantity, unit_price_cents, total_cents, status, created_at, updated_at]
+      properties:
+        id:
+          title: 订单号
+          examples: ["01936f40-1c2d-7e3f-8a4b-5c6d7e8f9a0b"]
+          type: string
+          format: uuid
+          x-go-type: string
+        customer_name:
+          title: 客户
+          examples: ["张三"]
+          type: string
+        product_id:
+          title: 商品 ID
+          examples: ["01936f3e-8a2b-7c4d-9e5f-0a1b2c3d4e5f"]
+          type: string
+          format: uuid
+          x-go-type: string
+        product_name:
+          title: 商品
+          examples: ["机械键盘"]
+          type: string
+          description: 下单时的商品名称，不随商品改名变化
+        quantity:
+          title: 数量
+          examples: [2]
+          type: integer
+          format: int64
+        unit_price_cents:
+          title: 单价
+          x-field: money
+          examples: [39900]
+          type: integer
+          format: int64
+          description: 下单时的单价，单位：分
+        total_cents:
+          title: 总额
+          x-field: money
+          examples: [79800]
+          type: integer
+          format: int64
+          description: 总额，单位：分
+        status:
+          title: 状态
+          $ref: "#/components/schemas/OrderStatus"
+        created_at:
+          title: 下单时间
+          type: string
+          format: date-time
+        updated_at:
+          title: 最后更新
+          type: string
+          format: date-time
+
+    OrderPage:
+      allOf:
+        - $ref: "#/components/schemas/PageTotal"
+        - type: object
+          required: [items]
+          properties:
+            items:
+              title: 订单
+              type: array
+              items:
+                $ref: "#/components/schemas/Order"
+
 
     UserStatus:
       type: string

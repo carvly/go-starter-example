@@ -5,6 +5,8 @@ import (
 
 	"app.local/internal/config"
 	"app.local/internal/modules/auth"
+	"app.local/internal/modules/order"
+	"app.local/internal/modules/product"
 	"app.local/internal/modules/staff"
 	"app.local/internal/platform/migrate"
 	"app.local/internal/platform/queue"
@@ -13,6 +15,8 @@ import (
 func migrationSources() []migrate.Source {
 	return []migrate.Source{
 		queue.Migrations,
+		product.Migrations,
+		order.Migrations,
 		staff.Migrations,
 		auth.Migrations,
 	}

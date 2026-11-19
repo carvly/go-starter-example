@@ -80,7 +80,7 @@ services:
         condition: service_healthy
     environment:
       DB_DSN: postgres://${POSTGRES_USER:-app}:${POSTGRES_PASSWORD:-app}@postgres:5432/${POSTGRES_DB:-app}?sslmode=disable
-    command: ["/app/api", "migrate", "up"]
+    entrypoint: ["/app/api", "migrate", "up"]
     restart: "no"
 
   api:

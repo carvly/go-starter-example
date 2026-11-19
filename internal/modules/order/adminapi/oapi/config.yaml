@@ -1,0 +1,8 @@
+# 只生成 api/admin.yaml 中 tag=orders 的操作及其引用的 schema。
+package: oapi
+generate:
+  echo5-server: true
+  models: true
+output-options:
+  include-tags: [orders]
+output: api.gen.go

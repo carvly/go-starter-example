@@ -23,6 +23,12 @@ servers:
   - url: /v1
 
 tags:
+  - name: products
+    summary: 商品
+    description: 商品，只读（internal/modules/product）；创建、改价、调库存在后台接口（api/admin.yaml）
+  - name: orders
+    summary: 订单
+    description: 订单（internal/modules/order）
   - name: auth
     summary: 登录与会话
     description: 前台用户的登录（微信各入口）、会话和账号（internal/modules/auth）
@@ -31,6 +37,112 @@ security:
   - bearerAuth: []
 
 paths:
+  /products:
+    get:
+      operationId: listProducts
+      tags: [products]
+      summary: 分页列出商品
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: 商品列表
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProductList"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
+  /products/{id}:
+    get:
+      operationId: getProduct
+      tags: [products]
+      summary: 查询单个商品
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      responses:
+        "200":
+          description: 商品详情
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Product"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /orders:
+    get:
+      operationId: listOrders
+      tags: [orders]
+      summary: 分页列出订单
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: 订单列表
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrderList"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+    post:
+      operationId: createOrder
+      tags: [orders]
+      summary: 下单
+      description: |
+        金额由服务端按下单时的商品单价 x 数量计算，客户端不能自己指定
+        金额。返回时订单状态是 `pending`——扣库存/确认订单是异步完成的
+        ，需要之后再 GET 一次订单看
+        最终状态是 `confirmed` 还是 `failed`。这个演示里下单不要求登录，
+        真实项目按自己的产品形态决定。
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateOrderRequest"
+      responses:
+        "201":
+          description: 下单成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Order"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          description: product_id 指向的商品不存在
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /orders/{id}:
+    get:
+      operationId: getOrder
+      tags: [orders]
+      summary: 查询单个订单
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      responses:
+        "200":
+          description: 订单详情
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Order"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
   /auth/oauth/{provider}/authorize:
     get:
       operationId: authorizeOAuth
@@ -749,3 +861,141 @@ components:
           examples: ["MTc2MjQxMjQwMDAwMDAwMDAwMHwwMTkzNmYzZS04YTJiLTdjNGQtOWU1Zi0wYTFiMmMzZDRlNWY"]
           type: string
           description: 为空表示没有下一页。
+
+    Product:
+      type: object
+      required: [id, name, price_cents, stock, created_at, updated_at]
+      properties:
+        id:
+          examples: ["01936f3e-8a2b-7c4d-9e5f-0a1b2c3d4e5f"]
+          type: string
+          format: uuid
+          x-go-type: string
+        name:
+          examples: ["机械键盘"]
+          type: string
+        price_cents:
+          examples: [39900]
+          type: integer
+          format: int64
+        stock:
+          examples: [100]
+          type: integer
+          format: int64
+        created_at:
+          examples: ["2026-11-06T08:00:00Z"]
+          type: string
+          format: date-time
+        updated_at:
+          examples: ["2026-11-06T08:00:00Z"]
+          type: string
+          format: date-time
+
+    ProductList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Product"
+        next_cursor:
+          examples: ["MTc2MjQxMjQwMDAwMDAwMDAwMHwwMTkzNmYzZS04YTJiLTdjNGQtOWU1Zi0wYTFiMmMzZDRlNWY"]
+          type: string
+          description: 为空表示没有下一页。
+
+    CreateOrderRequest:
+      type: object
+      required: [customer_name, product_id, quantity]
+      properties:
+        customer_name:
+          examples: ["张三"]
+          type: string
+          x-oapi-codegen-extra-tags:
+            validate: "required"
+        product_id:
+          examples: ["01936f3e-8a2b-7c4d-9e5f-0a1b2c3d4e5f"]
+          type: string
+          format: uuid
+          x-go-type: string
+          x-oapi-codegen-extra-tags:
+            validate: "required,uuid"
+        quantity:
+          examples: [2]
+          type: integer
+          format: int64
+          minimum: 1
+          x-oapi-codegen-extra-tags:
+            validate: "required,gt=0"
+
+    Order:
+      type: object
+      required:
+        - id
+        - customer_name
+        - product_id
+        - product_name
+        - quantity
+        - unit_price_cents
+        - total_cents
+        - status
+        - created_at
+        - updated_at
+      properties:
+        id:
+          examples: ["01936f40-1c2d-7e3f-8a4b-5c6d7e8f9a0b"]
+          type: string
+          format: uuid
+          x-go-type: string
+        customer_name:
+          examples: ["张三"]
+          type: string
+        product_id:
+          examples: ["01936f3e-8a2b-7c4d-9e5f-0a1b2c3d4e5f"]
+          type: string
+          format: uuid
+          x-go-type: string
+        product_name:
+          examples: ["机械键盘"]
+          type: string
+          description: 下单那一刻的商品名称快照，不随商品后续改名变化。
+        quantity:
+          examples: [2]
+          type: integer
+          format: int64
+        unit_price_cents:
+          examples: [39900]
+          type: integer
+          format: int64
+          description: 下单那一刻的单价快照。
+        total_cents:
+          examples: [79800]
+          type: integer
+          format: int64
+        status:
+          examples: ["pending"]
+          type: string
+          enum: [pending, confirmed, failed]
+          description: |
+            pending：刚下单，扣库存/确认还在异步处理中；confirmed：
+            扣库存成功；failed：库存不足等业务失败。
+        created_at:
+          examples: ["2026-11-06T08:00:00Z"]
+          type: string
+          format: date-time
+        updated_at:
+          examples: ["2026-11-06T08:00:00Z"]
+          type: string
+          format: date-time
+
+    OrderList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Order"
+        next_cursor:
+          examples: ["MTc2MjQxMjQwMDAwMDAwMDAwMHwwMTkzNmYzZS04YTJiLTdjNGQtOWU1Zi0wYTFiMmMzZDRlNWY"]
+          type: string

@@ -1,5 +1,4 @@
 # 本地的依赖和构建产物不进构建上下文：镜像里的前端由 Dockerfile 的 Node 阶段重新构建。
 web/admin/node_modules/
-web/admin/dist/
-!web/admin/dist/.placeholder
+web/admin/dist/assets/
 bin/

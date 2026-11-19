@@ -374,6 +374,111 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/products": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 商品列表
+         * @description 按创建时间倒序，页码分页。直接读库、不走缓存，改价和调库存后立刻能看到。
+         */
+        get: operations["listProducts"];
+        put?: never;
+        /** 创建商品 */
+        post: operations["createProduct"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/products/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 商品详情
+         * @description 直接读库、不经过缓存：编辑冲突后要拿到最新的 version。
+         */
+        get: operations["getProduct"];
+        /**
+         * 修改商品名称和单价
+         * @description 改价只影响之后的订单：订单保存了下单时的名称和单价。库存用调整库存接口改。请求带上读到的
+         *     version，打开表单之后别人改过这个商品时返回 409 product_conflict，不覆盖别人的修改。
+         */
+        put: operations["updateProduct"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/products/{id}/stock-adjustments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 调整库存
+         * @description 库存加上 delta（进货为正，盘亏为负），与下单扣减并发也不会丢更新。不提供"设为某个值"：
+         *     它会覆盖同时发生的下单扣减。调整后库存不能小于 0（insufficient_stock）或超过
+         *     1000000000（stock_too_large），这时不做任何修改。
+         */
+        post: operations["adjustProductStock"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/orders": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 订单列表
+         * @description 按下单时间倒序，页码分页。时间范围是半开区间 [from, to)。
+         */
+        get: operations["listOrders"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/orders/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 订单详情 */
+        get: operations["getOrder"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/users": {
         parameters: {
             query?: never;
@@ -895,6 +1000,169 @@ export interface components {
              * @description 为 true 时实际条数超过 10000，页面显示"10000+"
              */
             total_capped: boolean;
+        };
+        Product: {
+            /**
+             * ID
+             * Format: uuid
+             * @example 01936f3e-8a2b-7c4d-9e5f-0a1b2c3d4e5f
+             */
+            id: string;
+            /**
+             * 名称
+             * @example 机械键盘
+             */
+            name: string;
+            /**
+             * 单价
+             * Format: int64
+             * @description 单价，单位：分
+             * @example 39900
+             */
+            price_cents: number;
+            /**
+             * 库存
+             * Format: int64
+             * @example 100
+             */
+            stock: number;
+            /**
+             * 版本号
+             * Format: int64
+             * @description 版本号，修改商品时原样带回；调库存不改变它
+             * @example 3
+             */
+            version: number;
+            /**
+             * 创建时间
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * 更新时间
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        ProductPage: components["schemas"]["PageTotal"] & {
+            /** 商品 */
+            items: components["schemas"]["Product"][];
+        };
+        CreateProductRequest: {
+            /**
+             * 名称
+             * @example 机械键盘
+             */
+            name: string;
+            /**
+             * 单价
+             * Format: int64
+             * @description 单价，单位：分，不用小数
+             * @example 39900
+             */
+            price_cents: number;
+            /**
+             * 初始库存
+             * Format: int64
+             * @example 100
+             */
+            stock: number;
+        };
+        UpdateProductRequest: {
+            /**
+             * 名称
+             * @example 机械键盘
+             */
+            name: string;
+            /**
+             * 单价
+             * Format: int64
+             * @description 单价，单位：分
+             * @example 39900
+             */
+            price_cents: number;
+            /**
+             * 版本号
+             * Format: int64
+             * @description 打开编辑表单时商品的 version；已经不是最新时返回 409 product_conflict
+             * @example 3
+             */
+            version: number;
+        };
+        AdjustStockRequest: {
+            /**
+             * 增减量
+             * Format: int64
+             * @description 库存增减量，进货为正、盘亏为负，不能为 0
+             * @example 50
+             */
+            delta: number;
+        };
+        /**
+         * @description pending 处理中（异步扣库存）；confirmed 已扣库存；failed 处理失败（如库存不足）
+         * @enum {string}
+         */
+        OrderStatus: "pending" | "confirmed" | "failed";
+        Order: {
+            /**
+             * 订单号
+             * Format: uuid
+             * @example 01936f40-1c2d-7e3f-8a4b-5c6d7e8f9a0b
+             */
+            id: string;
+            /**
+             * 客户
+             * @example 张三
+             */
+            customer_name: string;
+            /**
+             * 商品 ID
+             * Format: uuid
+             * @example 01936f3e-8a2b-7c4d-9e5f-0a1b2c3d4e5f
+             */
+            product_id: string;
+            /**
+             * 商品
+             * @description 下单时的商品名称，不随商品改名变化
+             * @example 机械键盘
+             */
+            product_name: string;
+            /**
+             * 数量
+             * Format: int64
+             * @example 2
+             */
+            quantity: number;
+            /**
+             * 单价
+             * Format: int64
+             * @description 下单时的单价，单位：分
+             * @example 39900
+             */
+            unit_price_cents: number;
+            /**
+             * 总额
+             * Format: int64
+             * @description 总额，单位：分
+             * @example 79800
+             */
+            total_cents: number;
+            /** 状态 */
+            status: components["schemas"]["OrderStatus"];
+            /**
+             * 下单时间
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * 最后更新
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        OrderPage: components["schemas"]["PageTotal"] & {
+            /** 订单 */
+            items: components["schemas"]["Order"][];
         };
         /**
          * @description 用户的状态
@@ -1664,6 +1932,209 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+        };
+    };
+    listProducts: {
+        parameters: {
+            query?: {
+                /** @description 名称包含这个关键字（不区分大小写） */
+                q?: string;
+                /** @description 页码，从 1 开始，默认 1。只能翻到前 10000 条（page_out_of_range），更后面的数据加筛选条件查。 */
+                page?: components["parameters"]["Page"];
+                /** @description 每页条数，默认 20，超过 100 会被服务端拉回默认值。 */
+                size?: components["parameters"]["Size"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 商品列表 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProductPage"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    createProduct: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateProductRequest"];
+            };
+        };
+        responses: {
+            /** @description 已创建 */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Product"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    getProduct: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["ID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 商品 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Product"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    updateProduct: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["ID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateProductRequest"];
+            };
+        };
+        responses: {
+            /** @description 修改后的商品 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Product"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    adjustProductStock: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["ID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdjustStockRequest"];
+            };
+        };
+        responses: {
+            /** @description 调整后的商品 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Product"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    listOrders: {
+        parameters: {
+            query?: {
+                /** @description 订单状态，多个用逗号分隔，满足任一即可 */
+                status?: components["schemas"]["OrderStatus"][];
+                /** @description 下单时间起（含） */
+                from?: string;
+                /** @description 下单时间止（不含） */
+                to?: string;
+                /** @description 页码，从 1 开始，默认 1。只能翻到前 10000 条（page_out_of_range），更后面的数据加筛选条件查。 */
+                page?: components["parameters"]["Page"];
+                /** @description 每页条数，默认 20，超过 100 会被服务端拉回默认值。 */
+                size?: components["parameters"]["Size"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 订单列表 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrderPage"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    getOrder: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["ID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 订单 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Order"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
         };
     };
     listUsers: {

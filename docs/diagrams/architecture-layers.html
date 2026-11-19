@@ -141,7 +141,7 @@
     <rect x="784" y="436" width="160" height="56" rx="6" fill="#f5f5f5"/>
     <rect x="784" y="436" width="160" height="56" rx="6" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
     <text x="864" y="461" fill="#2d3142" font-size="12" font-weight="600" text-anchor="middle">events</text>
-    <text x="864" y="478" fill="#4f5d75" font-size="9" font-family="'Geist Mono', 'Noto Sans SC', monospace" text-anchor="middle">如 user_deleted</text>
+    <text x="864" y="478" fill="#4f5d75" font-size="9" font-family="'Geist Mono', 'Noto Sans SC', monospace" text-anchor="middle">如 order_created</text>
 
     <!-- kit -->
     <rect x="32" y="576" width="936" height="56" rx="6" fill="#f5f5f5"/>
@@ -169,7 +169,7 @@
   </g>
   </svg>
   </div>
-  <p class="note">依赖只向下走，规则由 <code>internal/archtest</code> 从包路径推导并强制：domain 只依赖标准库、kit 和本模块 events，不碰 platform 和 <code>internal/config</code>；接入包（httpapi、adminapi、jobs）只经本模块 Service 读写数据，不引用 postgres；模块之间只能引用对方的 events，其余协作经 <code>internal/app</code> 的适配器；platform 不认识模块。图里省略了几条不影响规则的边：模块根包会引用本模块 domain 和 platform，接入包也会引用 platform，cmd、app、platform 和模块根包会引用 <code>internal/config</code>。</p>
+  <p class="note">依赖只向下走，规则由 <code>internal/archtest</code> 从包路径推导并强制：domain 只依赖标准库、kit 和本模块 events，不碰 platform 和 <code>internal/config</code>；接入包（httpapi、adminapi、jobs）只经本模块 Service 读写数据，不引用 postgres；模块之间只能引用对方的 events，其余协作经 <code>internal/app</code> 的适配器；platform 不认识模块。图里省略了几条不影响规则的边：模块根包会引用本模块 domain 和 platform，接入包也会引用 platform，cmd、app、platform 和模块根包会引用 <code>internal/config</code>。fulfillment 是没有 domain 的编排模块，规则和端口接口放在根包 <code>process.go</code> 里。</p>
 </div>
 </body>
 </html>

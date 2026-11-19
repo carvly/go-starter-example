@@ -15,10 +15,13 @@ import { Route as LoginRouteImport } from './routes/login'
 import { Route as AuthedIndexRouteImport } from './routes/_authed/index'
 import { Route as AuthedAuditLogsRouteImport } from './routes/_authed/audit-logs'
 import { Route as AuthedForbiddenRouteImport } from './routes/_authed/forbidden'
+import { Route as AuthedProductsRouteImport } from './routes/_authed/products'
 import { Route as AuthedRolesRouteImport } from './routes/_authed/roles'
 import { Route as AuthedSettingsRouteImport } from './routes/_authed/settings'
 import { Route as AuthedAccountsIndexRouteImport } from './routes/_authed/accounts/index'
 import { Route as AuthedAccountsIdRouteImport } from './routes/_authed/accounts/$id'
+import { Route as AuthedOrdersIndexRouteImport } from './routes/_authed/orders/index'
+import { Route as AuthedOrdersIdRouteImport } from './routes/_authed/orders/$id'
 import { Route as AuthedUsersIndexRouteImport } from './routes/_authed/users/index'
 import { Route as AuthedUsersIdRouteImport } from './routes/_authed/users/$id'
 
@@ -51,6 +54,11 @@ const AuthedForbiddenRoute = AuthedForbiddenRouteImport.update({
   path: '/forbidden',
   getParentRoute: () => AuthedRoute,
 } as any)
+const AuthedProductsRoute = AuthedProductsRouteImport.update({
+  id: '/products',
+  path: '/products',
+  getParentRoute: () => AuthedRoute,
+} as any)
 const AuthedRolesRoute = AuthedRolesRouteImport.update({
   id: '/roles',
   path: '/roles',
@@ -71,6 +79,16 @@ const AuthedAccountsIdRoute = AuthedAccountsIdRouteImport.update({
   path: '/accounts/$id',
   getParentRoute: () => AuthedRoute,
 } as any)
+const AuthedOrdersIndexRoute = AuthedOrdersIndexRouteImport.update({
+  id: '/orders/',
+  path: '/orders/',
+  getParentRoute: () => AuthedRoute,
+} as any)
+const AuthedOrdersIdRoute = AuthedOrdersIdRouteImport.update({
+  id: '/orders/$id',
+  path: '/orders/$id',
+  getParentRoute: () => AuthedRoute,
+} as any)
 const AuthedUsersIndexRoute = AuthedUsersIndexRouteImport.update({
   id: '/users/',
   path: '/users/',
@@ -88,11 +106,14 @@ export interface FileRoutesByFullPath {
   '/login': typeof LoginRoute
   '/audit-logs': typeof AuthedAuditLogsRoute
   '/forbidden': typeof AuthedForbiddenRoute
+  '/products': typeof AuthedProductsRoute
   '/roles': typeof AuthedRolesRoute
   '/settings': typeof AuthedSettingsRoute
   '/accounts/$id': typeof AuthedAccountsIdRoute
+  '/orders/$id': typeof AuthedOrdersIdRoute
   '/users/$id': typeof AuthedUsersIdRoute
   '/accounts/': typeof AuthedAccountsIndexRoute
+  '/orders/': typeof AuthedOrdersIndexRoute
   '/users/': typeof AuthedUsersIndexRoute
 }
 export interface FileRoutesByTo {
@@ -100,12 +121,15 @@ export interface FileRoutesByTo {
   '/login': typeof LoginRoute
   '/audit-logs': typeof AuthedAuditLogsRoute
   '/forbidden': typeof AuthedForbiddenRoute
+  '/products': typeof AuthedProductsRoute
   '/roles': typeof AuthedRolesRoute
   '/settings': typeof AuthedSettingsRoute
   '/': typeof AuthedIndexRoute
   '/accounts/$id': typeof AuthedAccountsIdRoute
+  '/orders/$id': typeof AuthedOrdersIdRoute
   '/users/$id': typeof AuthedUsersIdRoute
   '/accounts': typeof AuthedAccountsIndexRoute
+  '/orders': typeof AuthedOrdersIndexRoute
   '/users': typeof AuthedUsersIndexRoute
 }
 export interface FileRoutesById {
@@ -115,12 +139,15 @@ export interface FileRoutesById {
   '/login': typeof LoginRoute
   '/_authed/audit-logs': typeof AuthedAuditLogsRoute
   '/_authed/forbidden': typeof AuthedForbiddenRoute
+  '/_authed/products': typeof AuthedProductsRoute
   '/_authed/roles': typeof AuthedRolesRoute
   '/_authed/settings': typeof AuthedSettingsRoute
   '/_authed/': typeof AuthedIndexRoute
   '/_authed/accounts/$id': typeof AuthedAccountsIdRoute
+  '/_authed/orders/$id': typeof AuthedOrdersIdRoute
   '/_authed/users/$id': typeof AuthedUsersIdRoute
   '/_authed/accounts/': typeof AuthedAccountsIndexRoute
+  '/_authed/orders/': typeof AuthedOrdersIndexRoute
   '/_authed/users/': typeof AuthedUsersIndexRoute
 }
 export interface FileRouteTypes {
@@ -131,11 +158,14 @@ export interface FileRouteTypes {
     | '/login'
     | '/audit-logs'
     | '/forbidden'
+    | '/products'
     | '/roles'
     | '/settings'
     | '/accounts/$id'
+    | '/orders/$id'
     | '/users/$id'
     | '/accounts/'
+    | '/orders/'
     | '/users/'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -143,12 +173,15 @@ export interface FileRouteTypes {
     | '/login'
     | '/audit-logs'
     | '/forbidden'
+    | '/products'
     | '/roles'
     | '/settings'
     | '/'
     | '/accounts/$id'
+    | '/orders/$id'
     | '/users/$id'
     | '/accounts'
+    | '/orders'
     | '/users'
   id:
     | '__root__'
@@ -157,12 +190,15 @@ export interface FileRouteTypes {
     | '/login'
     | '/_authed/audit-logs'
     | '/_authed/forbidden'
+    | '/_authed/products'
     | '/_authed/roles'
     | '/_authed/settings'
     | '/_authed/'
     | '/_authed/accounts/$id'
+    | '/_authed/orders/$id'
     | '/_authed/users/$id'
     | '/_authed/accounts/'
+    | '/_authed/orders/'
     | '/_authed/users/'
   fileRoutesById: FileRoutesById
 }
@@ -216,6 +252,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthedForbiddenRouteImport
       parentRoute: typeof AuthedRoute
     }
+    '/_authed/products': {
+      id: '/_authed/products'
+      path: '/products'
+      fullPath: '/products'
+      preLoaderRoute: typeof AuthedProductsRouteImport
+      parentRoute: typeof AuthedRoute
+    }
     '/_authed/roles': {
       id: '/_authed/roles'
       path: '/roles'
@@ -244,6 +287,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthedAccountsIdRouteImport
       parentRoute: typeof AuthedRoute
     }
+    '/_authed/orders/': {
+      id: '/_authed/orders/'
+      path: '/orders'
+      fullPath: '/orders/'
+      preLoaderRoute: typeof AuthedOrdersIndexRouteImport
+      parentRoute: typeof AuthedRoute
+    }
+    '/_authed/orders/$id': {
+      id: '/_authed/orders/$id'
+      path: '/orders/$id'
+      fullPath: '/orders/$id'
+      preLoaderRoute: typeof AuthedOrdersIdRouteImport
+      parentRoute: typeof AuthedRoute
+    }
     '/_authed/users/': {
       id: '/_authed/users/'
       path: '/users'
@@ -264,24 +321,30 @@ declare module '@tanstack/react-router' {
 interface AuthedRouteChildren {
   AuthedAuditLogsRoute: typeof AuthedAuditLogsRoute
   AuthedForbiddenRoute: typeof AuthedForbiddenRoute
+  AuthedProductsRoute: typeof AuthedProductsRoute
   AuthedRolesRoute: typeof AuthedRolesRoute
   AuthedSettingsRoute: typeof AuthedSettingsRoute
   AuthedIndexRoute: typeof AuthedIndexRoute
   AuthedAccountsIdRoute: typeof AuthedAccountsIdRoute
+  AuthedOrdersIdRoute: typeof AuthedOrdersIdRoute
   AuthedUsersIdRoute: typeof AuthedUsersIdRoute
   AuthedAccountsIndexRoute: typeof AuthedAccountsIndexRoute
+  AuthedOrdersIndexRoute: typeof AuthedOrdersIndexRoute
   AuthedUsersIndexRoute: typeof AuthedUsersIndexRoute
 }
 
 const AuthedRouteChildren: AuthedRouteChildren = {
   AuthedAuditLogsRoute: AuthedAuditLogsRoute,
   AuthedForbiddenRoute: AuthedForbiddenRoute,
+  AuthedProductsRoute: AuthedProductsRoute,
   AuthedRolesRoute: AuthedRolesRoute,
   AuthedSettingsRoute: AuthedSettingsRoute,
   AuthedIndexRoute: AuthedIndexRoute,
   AuthedAccountsIdRoute: AuthedAccountsIdRoute,
+  AuthedOrdersIdRoute: AuthedOrdersIdRoute,
   AuthedUsersIdRoute: AuthedUsersIdRoute,
   AuthedAccountsIndexRoute: AuthedAccountsIndexRoute,
+  AuthedOrdersIndexRoute: AuthedOrdersIndexRoute,
   AuthedUsersIndexRoute: AuthedUsersIndexRoute,
 }
 

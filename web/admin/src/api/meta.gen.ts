@@ -3,8 +3,13 @@
 
 import { z } from "zod";
 
-import { textInput } from "@/lib/field-schemas";
+import { intInput, moneyInput, textInput } from "@/lib/field-schemas";
 import { daySearch, enumListSearch, enumSearch, pageSearch, textSearch, uuidSearch } from "@/lib/search";
+
+export const orderStatusMeta = {
+  values: ["pending", "confirmed", "failed"],
+  labels: { pending: "处理中", confirmed: "已确认", failed: "失败" },
+} as const;
 
 export const userStatusMeta = {
   values: ["active", "disabled", "deleted"],
@@ -246,6 +251,84 @@ export const pageTotalMeta = {
   },
 } as const;
 
+export const productMeta = {
+  fields: {
+    id: { title: "ID" },
+    name: { title: "名称" },
+    price_cents: { title: "单价" },
+    stock: { title: "库存" },
+    version: { title: "版本号" },
+    created_at: { title: "创建时间" },
+    updated_at: { title: "更新时间" },
+  },
+} as const;
+
+export const productPageMeta = {
+  fields: {
+    total: { title: "总数" },
+    total_capped: { title: "超过上限" },
+    items: { title: "商品" },
+  },
+} as const;
+
+export const createProductRequestMeta = {
+  fields: {
+    name: { title: "名称", max: 200 },
+    price_cents: { title: "单价", min: 1 },
+    stock: { title: "初始库存", min: 0, max: 1000000000 },
+  },
+  form: z.object({
+    name: textInput({ title: "名称", required: true, max: 200 }),
+    price_cents: moneyInput({ title: "单价", required: true, min: 1 }),
+    stock: intInput({ title: "初始库存", required: true, min: 0, max: 1000000000 }),
+  }),
+} as const;
+
+export const updateProductRequestMeta = {
+  fields: {
+    name: { title: "名称", max: 200 },
+    price_cents: { title: "单价", min: 1 },
+    version: { title: "版本号", min: 1 },
+  },
+  form: z.object({
+    name: textInput({ title: "名称", required: true, max: 200 }),
+    price_cents: moneyInput({ title: "单价", required: true, min: 1 }),
+    version: z.number().int(),
+  }),
+} as const;
+
+export const adjustStockRequestMeta = {
+  fields: {
+    delta: { title: "增减量", min: -1000000000, max: 1000000000 },
+  },
+  form: z.object({
+    delta: intInput({ title: "增减量", required: true, min: -1000000000, max: 1000000000 }),
+  }),
+} as const;
+
+export const orderMeta = {
+  fields: {
+    id: { title: "订单号" },
+    customer_name: { title: "客户" },
+    product_id: { title: "商品 ID" },
+    product_name: { title: "商品" },
+    quantity: { title: "数量" },
+    unit_price_cents: { title: "单价" },
+    total_cents: { title: "总额" },
+    status: { title: "状态", labels: orderStatusMeta.labels },
+    created_at: { title: "下单时间" },
+    updated_at: { title: "最后更新" },
+  },
+} as const;
+
+export const orderPageMeta = {
+  fields: {
+    total: { title: "总数" },
+    total_capped: { title: "超过上限" },
+    items: { title: "订单" },
+  },
+} as const;
+
 export const userMeta = {
   fields: {
     id: { title: "ID" },
@@ -308,6 +391,24 @@ export const listAuditLogsMeta = {
     from: daySearch,
     to: daySearch,
   }),
+} as const;
+
+export const listProductsMeta = {
+  search: z.object({
+    q: textSearch,
+    page: pageSearch(20),
+  }),
+  pageSize: 20,
+} as const;
+
+export const listOrdersMeta = {
+  search: z.object({
+    status: enumListSearch(orderStatusMeta.values),
+    from: daySearch,
+    to: daySearch,
+    page: pageSearch(20),
+  }),
+  pageSize: 20,
 } as const;
 
 export const listUsersMeta = {

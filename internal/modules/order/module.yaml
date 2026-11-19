@@ -1,0 +1,3 @@
+web_paths:
+  - web/admin/src/features/orders
+  - web/admin/src/routes/_authed/orders

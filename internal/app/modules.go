@@ -5,6 +5,9 @@ import (
 	"github.com/riverqueue/river"
 
 	"app.local/internal/modules/auth"
+	"app.local/internal/modules/fulfillment"
+	"app.local/internal/modules/order"
+	"app.local/internal/modules/product"
 	"app.local/internal/modules/staff"
 	"app.local/internal/platform/cli"
 	"app.local/internal/platform/queue"
@@ -15,22 +18,37 @@ import (
 // 返回值一行、注册切片里各一行。scripts/check-module-removal.sh 按这个约定逐行删除
 // 来演练"删掉一个模块"，internal/app 的测试检查每个模块目录都在这里注册过。
 
+var moduleRequires = map[string][]string{
+	"order": {"fulfillment"},
+}
+
 type Modules struct {
-	Staff *staff.Module
-	Auth  *auth.Module
+	Product     *product.Module
+	Order       *order.Module
+	Fulfillment *fulfillment.Module
+	Staff       *staff.Module
+	Auth        *auth.Module
 }
 
 func buildModules(in *Infra, configs moduleConfigs) *Modules {
+	productM := product.New(product.Deps{DB: in.DBTx, Redis: in.Redis, Logger: in.Logger})
+	orderM := order.New(order.Deps{DB: in.DBTx, Queue: in.Queue, Products: productLookup{productM.Service}})
+	fulfillmentM := fulfillment.New(fulfillment.Deps{UoW: in.DBTx, Ledger: orderM.EventLedger(), Stock: stockReserver{productM.Service}, Orders: orderM.Service})
 	staffM := staff.New(staff.Deps{DB: in.DBTx, Config: configs.Staff, Argon2: in.Config.Argon2, Operations: adminOperations(), Logger: in.Logger})
 	authM := auth.New(auth.Deps{DB: in.DBTx, Config: configs.Auth, Queue: in.Queue, Redis: in.Redis, Logger: in.Logger})
 	return &Modules{
-		Staff: staffM,
-		Auth:  authM,
+		Product:     productM,
+		Order:       orderM,
+		Fulfillment: fulfillmentM,
+		Staff:       staffM,
+		Auth:        authM,
 	}
 }
 
 func (m *Modules) httpRegistrars() []func(*echo.Group) {
 	return []func(*echo.Group){
+		m.Product.RegisterHTTP,
+		m.Order.RegisterHTTP,
 		m.Auth.RegisterHTTP,
 	}
 }
@@ -38,6 +56,8 @@ func (m *Modules) httpRegistrars() []func(*echo.Group) {
 // adminRegistrars 是有后台操作的模块（RegisterAdminHTTP，挂在 /admin/v1 下）。
 func (m *Modules) adminRegistrars() []func(*echo.Group) {
 	return []func(*echo.Group){
+		m.Product.RegisterAdminHTTP,
+		m.Order.RegisterAdminHTTP,
 		m.Staff.RegisterAdminHTTP,
 		m.Auth.RegisterAdminHTTP,
 	}
@@ -53,6 +73,7 @@ func (m *Modules) adminAuth() []echo.MiddlewareFunc {
 
 func (m *Modules) jobRegistrars() []func(*river.Workers) {
 	return []func(*river.Workers){
+		m.Fulfillment.RegisterJobs,
 		m.Staff.RegisterJobs,
 		m.Auth.RegisterJobs,
 	}
@@ -60,6 +81,7 @@ func (m *Modules) jobRegistrars() []func(*river.Workers) {
 
 func jobKindRegistrars() []func() []string {
 	return []func() []string{
+		fulfillment.JobKinds,
 		staff.JobKinds,
 		auth.JobKinds,
 	}
