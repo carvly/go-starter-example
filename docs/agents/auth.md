@@ -1,69 +1,84 @@
 # 鉴权
 
-事实来源：`internal/modules/auth/`、`internal/modules/staff/`、`internal/platform/crypto/`、`internal/platform/oauth/`、`internal/platform/httpserver/identity.go`
+事实来源：`internal/modules/user/`、`internal/modules/staff/`、`internal/platform/crypto/`、`internal/platform/oauth/`、`internal/platform/httpserver/identity.go`
 
-改 `internal/modules/auth/`、`internal/modules/staff/`、`internal/platform/crypto/`、
+改 `internal/modules/user/`、`internal/modules/staff/`、`internal/platform/crypto/`、
 `internal/platform/oauth/` 或给接口加鉴权之前读这篇。
 
-## 前台用户（auth 模块）
+## 前台用户（user 模块）
 
-`internal/modules/auth/` 管前台用户：账号的后台管理、登录（微信四个入口，按需启用）、
+`internal/modules/user/` 管前台用户：账号的后台管理、登录（微信四个入口，按需启用）、
 会话、重新验证、绑定/解绑、注销，以及供其它模块挂载的前台鉴权中间件。
 
 - **用户的后台管理**：`users` 表和后台的列表、详情、停用 / 启用（`user:read`、
   `user:disable`、`user:enable`）由生成器生成（描述文件存为夹具
-  `tools/gen/testdata/auth_user.yaml`，**P1a 起冻结**：登录代码是生成器管理范围之外的
-  手写代码，不再对 auth 重新 `gen apply`，见 [generator.md](generator.md)）。生成之后
+  `tools/gen/testdata/fixture_user.yaml`，**已冻结**：登录代码是生成器管理范围之外的
+  手写代码，不再对 user 模块重新 `gen apply`，见 [generator.md](generator.md)）。生成之后
   手写加了用户详情页的登录方式列表（`listUserIdentities`）、会话列表（`listUserSessions`，
   都是 `user:read`）和踢下线（`kickUserSession`，`user:kick`）。账号只能经登录创建，
   后台不能新建或编辑。停用
   （`Repository.Disable`）在同一条语句里改状态并吊销该用户全部未吊销的会话
   （`user_sessions`），会话校验每次都查库，停用立即生效。
 - **登录方式**：`user_identities` 表，`(provider, subject)` 唯一定位，每种 provider
-  每个账号最多一个，绑定新的就替换旧的。P1a 只有微信（`subject` 是 unionid）；
-  邮箱/手机号只能由验证码流程创建（P1b/P2），第三方声明的邮箱不落库也不成为
-  登录方式。微信各入口的 openid 单独存 `wechat_openids`（支付、模板消息用），
+  每个账号最多一个，绑定新的就替换旧的。现在只有微信（`subject` 是 unionid）；
+  邮箱/手机号只能由验证码流程创建，第三方声明的邮箱不落库也不成为登录方式。微信各入口的 openid 单独存 `wechat_openids`（支付、模板消息用），
   换绑成另一个 unionid 时先删该账号全部 openid 再写入。
 - **登录入口**：网站应用扫码、服务号网页授权走浏览器 OAuth 流程
   （`internal/platform/oauth/` 的 `Provider`：一次性 state + 浏览器绑定 cookie 防
   登录 CSRF，登录多一步兑换）；小程序 `wx.login`、App SDK 走原生接口
   （`Native`）。第三方的 code 换身份在事务之外同步完成；"解析账号"的安全规则
   写在 `domain` 的 `ResolveLogin`/`ResolveBind` 里，所有入口只能经过它。
+- **通用链路**：流程按 provider 的能力声明工作，新增 provider 不改流程、表结构和 spec。
+  - 浏览器：`Provider.Capabilities()` 返回 `BrowserCapabilities{PKCE, Nonce}`。声明了的，发起时由
+    `domain` 的 `StartOAuthFlow` 生成 verifier（43 个字符）和 nonce，随 state 行存进 `oauth_states`
+    的 payload；授权链接带 `oauth.S256Challenge(verifier)` 和 nonce；回调一次性取出 state 行，把
+    verifier、nonce 和回调的全部参数（`ExchangeParams.Callback`）交给 `Exchange`。重新验证时
+    `AuthorizeParams.Reauthenticate` 为真，provider 自行加 `prompt` 之类的参数。provider 专有的回调参数
+    （如微信快照页的 `is_snapshotuser`）由 provider 自己处理，流程只把哨兵错误映射成结果码。
+  - 回调同时接受 GET 和表单 POST（`response_mode=form_post`），两者走同一个 `handleOAuthCallback`。
+  - 原生：`Native.Capabilities()` 返回 `NativeCapabilities{Nonce}`。声明了 nonce 的，客户端先调
+    `POST /v1/auth/native/{provider}/nonce`（`oauth_states` 的 `kind=nonce`，绑定 provider，5 分钟），
+    再随凭证提交；流程一次性核销后交给 provider 比对 id_token，截获的 id_token 因此无法重放。原生请求
+    体的 `code`、`id_token`、`nonce`、`name` 都是可选的，缺了 provider 需要的字段返回
+    `oauth.ErrMissingCredential`；所有原生入口都经 `httpapi` 的 `verifyNative`。
+  - 校验失败对客户端一律是登录失败；`oauth.ErrNoUnionID`（应用没绑定开放平台）按错误级别记录，便于报警。
 - **入口按需启用**：四个入口是组合关系，产品用到哪个就配哪个应用的凭据。
   `WECHAT_<WEB|MP|MINI|APP>_APP_ID` 和 `_SECRET` 成对配置才启用
   （`WeChatAppCredentials.Enabled`），都留空就不启用，只配一半启动失败。`providers.go` 的
   `wechatRegistry` 只登记启用的入口；请求未启用的入口（登录、绑定、重新验证）和未知入口
   一样返回 400。注册表的装配在 `providers.go`。
 - **会话**：每次登录建一行 `user_sessions`。access token 是 HS256 的 JWT，header 带
-  `kid`，claims 只有 iss/aud/sub/sid/iat/exp，有效期 `AUTH_ACCESS_TOKEN_TTL`（默认
+  `kid`，claims 只有 iss/aud/sub/sid/iat/exp，有效期 `USER_ACCESS_TOKEN_TTL`（默认
   15 分钟）；**每个请求按 `sid` 查会话行**（带 `users.status`）：吊销、过期、空闲超时、
   账号停用立即生效，查询失败也拒绝，不加缓存。refresh token 按 `refresh_family` 定位，
-  轮换后上一代在 `AUTH_REFRESH_GRACE_PERIOD`（默认 10 秒）内仍可用；`refresh_family`
+  轮换后上一代在 `USER_REFRESH_GRACE_PERIOD`（默认 10 秒）内仍可用；`refresh_family`
   对得上、随机串既不是当前值也不是宽限期内的上一代，而会话仍然有效时，视为泄露、吊销
   整个会话（`domain/session.go` 的 `Refresh`）；客户端必须串行刷新。refresh token 按
-  请求 `Origin` 交付：名单内（`AUTH_COOKIE_DELIVERY_ORIGINS`）只进 httpOnly +
+  请求 `Origin` 交付：名单内（`USER_COOKIE_DELIVERY_ORIGINS`）只进 httpOnly +
   SameSite=Strict cookie（Path `/v1/auth/session`），名单外（App、小程序）走响应体。
-- **登录接口的防护**：`/v1/auth/*` 的六个操作（发起授权、回调、兑换、原生登录、刷新、登出）在全局限流
-  之外再按 IP 限流，每秒 5 次（`module.go` 的常量 `authRatePerSecond`，不可配置），配了
+- **登录接口的防护**：`/v1/auth/*` 的操作（发起授权、回调、兑换、原生登录、签发原生 nonce、刷新、登出）在
+  全局限流之外再按 IP 限流，每秒 5 次（`module.go` 的常量 `authRatePerSecond`，不可配置），配了
   Redis 时多实例共享计数；带请求体的操作只接受 `application/json`，表单等其它类型返回
   415（`httpapi/json_only.go`，挂在哪些操作上见 `httpapi/routes.go`），跨站页面不触发
-  预检的表单请求到不了 handler。
-- **必需配置**：`AUTH_PUBLIC_BASE_URL` 是浏览器 OAuth 流程 redirect_uri 的 origin，必须是
+  预检的表单请求到不了 handler。唯一的例外是表单 POST 回调（`oauthCallbackForm`）：第三方本来就用跨站
+  表单回调，防护由一次性 state 和绑定 cookie 承担——绑定 cookie 是 `SameSite=None; Secure`，只在发起
+  授权的浏览器里有，跨站表单带不来别人的。
+- **必需配置**：`USER_PUBLIC_BASE_URL` 是浏览器 OAuth 流程 redirect_uri 的 origin，必须是
   浏览器会发出的规范 origin（小写 `scheme://host[:port]`，不带默认端口、路径和用户信息），
-  `AUTH_COOKIE_DELIVERY_ORIGINS` 的每一项同样要求，不规范时启动失败。`WECHAT_*` 不是
-  必需项，见上面的"入口按需启用"（校验在 `internal/modules/auth/config.go` 的 `LoadConfig`）。
+  `USER_COOKIE_DELIVERY_ORIGINS` 的每一项同样要求，不规范时启动失败。`WECHAT_*` 不是
+  必需项，见上面的"入口按需启用"（校验在 `internal/modules/user/config.go` 的 `LoadConfig`）。
 - **我的会话、我的登录方式**：`GET /v1/me/sessions`（只列未吊销的）和
   `GET /v1/me/identities` 按 cursor 分页，按创建时间倒序（`PageByUser`）；后台用户详情页
   的两个列表和账号内部逻辑用全量的 `ListByUser`。
-- **重新验证**：† 操作要求 `auth_time` 在 `AUTH_REAUTH_WINDOW`（默认 10 分钟）内，
-  由 `RequireRecentAuth` 中间件检查（见"给操作加鉴权"）。P1a 的账号只有微信登录
+- **重新验证**：† 操作要求 `auth_time` 在 `USER_REAUTH_WINDOW`（默认 10 分钟）内，
+  由 `RequireRecentAuth` 中间件检查（见"给操作加鉴权"）。现在账号只有微信登录
   方式，重新验证只能走微信（小程序入口静默完成，客户端在注销/换绑前自己弹确认框）。
 - **注销**：`DELETE /v1/me`（†）在一个事务里置 `status=deleted`、清空昵称头像、
   吊销全部会话、删除全部登录方式和 openid，并发布 `user_deleted` 事件
-  （worker 在 auth 的 `jobs/` 里，清理器在组合根通过 `authM.AddUserDataCleaner(...)` 登记，
+  （worker 在 user 的 `jobs/` 里，清理器在组合根通过 `userM.AddDataCleaner(...)` 登记，
   见 [queue.md](queue.md)）。`users.last_login_at` 在每次登录时更新，`users.signup_client`
   记录建号时的客户端；后台列表可以按最近登录时间排序和筛选。
-- **过期行清理**：`auth_cleanup` 定时任务（auth 的 `PeriodicJobs()`，每小时 +
+- **过期行清理**：`user_cleanup` 定时任务（user 的 `PeriodicJobs()`，每小时 +
   启动时一次）删除 `oauth_states` 过期行、`user_sessions` 过期行和吊销超过 7 天的行。
 - **换绑是账号所有权的变更**：同一种 provider 换成新的 subject 时，吊销用旧登录方式建立的其它
   会话，当前会话的 `login_identity_id` 改指向新的登录方式（`ResolveBind`）。以后即使改成原地更新
@@ -76,8 +91,9 @@
   验证码，第三方重新验证只作为没有其它凭据的账号的兜底。
 - **建号时的昵称和头像**：取第三方的昵称，为空时（小程序入口）用"微信用户"；昵称按字符截到 64，
   头像超过 1024 不存；原始值照常进 `profile`。
-- **`return_to` 和 `redirect_uri`**：`return_to` 只接受以单个 `/` 开头的站内路径
-  （`ValidReturnTo`）；`redirect_uri` 由 `AUTH_PUBLIC_BASE_URL` 加固定路径拼出，和平台侧登记的值精确
+- **`return_to` 和 `redirect_uri`**：`return_to` 只接受以单个 `/` 开头的站内路径，整串不能有
+  反斜杠和控制字符，解析后不能有 scheme 和 host（`ValidReturnTo`；浏览器会去掉制表符、把 `\` 当 `/`，只看前缀
+  挡不住 `/<制表符>/evil.com`）；`redirect_uri` 由 `USER_PUBLIC_BASE_URL` 加固定路径拼出，和平台侧登记的值精确
   匹配。
 - **为什么每个请求查库还保留 JWT + refresh 两层**：web 的长期凭据只在 httpOnly cookie 里；refresh
   轮换能发现盗用；签名先挡掉伪造的 token，不必为它们查库。泄露检测按 `refresh_family` 定位，因为
@@ -109,23 +125,24 @@
 
 ## 接入新的登录方式
 
-表结构、"解析账号"、会话、解绑规则都不用改：
+表结构、通用链路、"解析账号"、会话、解绑规则都不用改：
 
-1. 在 `internal/platform/oauth/` 实现 `Provider`（浏览器跳转）或 `Native`（原生 SDK），带用 httptest
-   模拟对方响应的测试；
-2. `internal/modules/auth/config.go` 加凭据和校验（按"能力和启用分开"：没配就不启用）；
-3. 在 auth 的 `providers.go` 的注册表里登记；
+1. 在 `internal/platform/oauth/` 实现 `Provider`（浏览器跳转）或 `Native`（原生 SDK）：声明
+   `Capabilities()`，在 `AuthorizeURL` 里放进 challenge、nonce 和自己专有的参数（如 `response_mode`），
+   在 `Exchange` / `VerifyNative` 里校验（OIDC 的 id_token 签名、iss/aud/exp/nonce 由 provider 校验），
+   从 `ExchangeParams.Callback` 读自己专有的回调字段；带用 httptest 模拟对方响应的测试；
+2. `internal/modules/user/config.go` 加凭据和校验（按"能力和启用分开"：没配就不启用）；
+3. 在 user 的 `providers.go` 的注册表里登记；
 4. 在平台侧配置回调地址（指向 API 域名）；
 5. `api/admin.yaml` 的登录方式枚举（已预留 email、phone、github、google、apple）补上显示名，
    `make generate`。
 
-后续阶段（手机号、邮箱、密码、GitHub、Google、Apple）的规划见
-[`docs/proposals/0004-多方式登录.md`](../proposals/0004-多方式登录.md)。
+手机号、邮箱、密码登录和 GitHub、Google、Apple 等 provider 还没有实现。
 
 ## 业务怎么扩展用户
 
 业务自己的用户资料放在业务模块里，按 `user_id` 关联，不建外键，需要时惰性初始化；
-不要修改 auth 的表或 Repository。auth 提供两个组合根扩展点：
+不要修改 user 的表或 Repository。user 提供两个组合根扩展点：
 
 - `Service.GetPublicProfiles(ctx, ids) (map[string]PublicProfile, error)` 批量返回
   `id`、`display_name`、`avatar_url`、`status`，不存在的 ID 不在结果里；业务列表不要逐行查用户；
@@ -134,28 +151,30 @@
 
 持有用户数据的模块还要同时提供两种幂等清理：
 
-1. 实现 `auth.UserDataCleaner`，全部模块构造完成后在 `internal/app/modules.go`
-   用独立一行 `authM.AddUserDataCleaner(memberM.UserDataCleaner())` 登记，`user_deleted`
+1. 实现 `user.DataCleaner`，全部模块构造完成后在 `internal/app/modules.go`
+   用独立一行 `userM.AddDataCleaner(memberM.UserDataCleaner())` 登记，`user_deleted`
    worker 会即时调用；登记行不是构造依赖，删除任一模块时一起删除；
 2. 提供每天一次的清扫任务，按本模块表里的 `user_id` 分批，经组合根适配器调用
    `GetPublicProfiles`，删除状态为 `deleted` 或结果里不存在的用户数据。它补偿滚动部署期间
    旧 worker 不认识新清理器、以及清理重试耗尽造成的遗漏；这个查询适配器让业务模块真实依赖
-   auth，所以删除 auth 时该业务模块也要删除。
+   user，所以删除 user 时该业务模块也要删除。
 
 不推送注册、停用、启用事件：停用已由每个请求的会话查询实时生效，注销是终态。
 
 ## 前台鉴权：两种模式，二选一
 
-- **默认：会话中间件**（`internal/modules/auth/httpapi/middleware.go` 的
+- **默认：会话中间件**（`internal/modules/user/httpapi/middleware.go` 的
   `NewSessionMiddleware`）：验签（HS256 + `kid` 轮换，旧密钥放 `JWT_ADDITIONAL_KEYS`）
   → 校验 iss/aud/exp → 按 `sid` 查会话。吊销立即生效，† 操作拿得到 `auth_time`；
 - **网关信任 header**（`trusted_identity_middleware.go`）：部署在已经校验过身份的
-  网关后面时用。这个模式下 `UserSession` 只有 `UserID`，`RequireRecentAuth` 拿不到
-  `auth_time`，直接拒绝 † 操作（fail closed）。中间件本身不做任何签名校验，
+  网关后面时用。这个模式下 `UserSession` 只有 `UserID`，没有服务端会话：依赖会话的操作（† 操作、绑定、
+  重新验证）一律返回 403 `session_unavailable`（fail closed），不返回 `recent_auth_required`，客户端不会
+  陷入"去重新验证、再失败"的循环。中间件本身不做任何签名校验，
   前提是客户端无法绕过网关直连服务、网关会清掉客户端带来的同名 header。配错
   不会报错，只会让鉴权悄悄失效。
 
-切换只改 `internal/modules/auth/module.go` 的 `Middleware()` 一处。两种实现都把
+由配置切换：`USER_TRUSTED_IDENTITY_HEADER` 留空用会话中间件，填上网关透传的 header 名（如
+`X-User-ID`）用信任 header 模式，选择逻辑在 `internal/modules/user/module.go` 的 `Middleware()`。两种实现都把
 身份写进 `httpserver.SetUserSession`，handler 用 `httpserver.UserSessionFrom(c)` 读，
 不需要跟着改。请求上下文里的身份按主体分类型（前台用户 `UserSession`，后台员工
 `StaffSession`），一个 handler 读错了类型只会得到 401，不会把另一类主体的 ID 当成
@@ -164,11 +183,11 @@
 ## 给操作加鉴权
 
 前台接口：模块的 `Deps` 收一个 `Auth echo.MiddlewareFunc`，由组合根传入
-`authM.Middleware()`（这样模块在 `modules.go` 里依赖 auth，删除演练会连带处理）；在
+`userM.Middleware()`（这样模块在 `modules.go` 里依赖 user，删除演练会连带处理）；在
 `httpapi/routes.go` 的 `OperationMiddlewares` 里按 operationId 挂上，spec 里对应操作去掉
 `security: []`。敏感操作（改绑登录方式、注销等，接口文档标 †）在 Auth 之后再挂
-`mw.RequireRecentAuth`，由组合根传入 `authM.RequireRecentAuth()`（窗口是
-`AUTH_REAUTH_WINDOW`）：
+`mw.RequireRecentAuth`，由组合根传入 `userM.RequireRecentAuth()`（窗口是
+`USER_REAUTH_WINDOW`）：
 
 ```go
 // internal/modules/<m>/httpapi/routes.go
@@ -183,9 +202,9 @@ func Register(g *echo.Group, h *Handler, mw Middlewares) {
 ```
 
 生成器的 `web.auth` 只生成 `{mw.Auth}` 这一种挂法，不挂 `RequireRecentAuth`
-（`REPO-AUTH-MISSING` 检查 auth 模块和它的 `Middleware()` 存在）。
+（`REPO-AUTH-MISSING` 检查有且只有一个模块提供 `Middleware()`）。
 
-仓库里目前没有其它前台模块挂它：管理类操作（建商品、改价、调库存）放在后台接入面，由员工
+仓库里目前没有其它前台模块挂它：管理类操作（新建、修改、调整业务数据）放在后台接入面，由员工
 的会话和权限码保护（见下文"后台员工"），不是"登录用户即管理员"。后台操作不需要上面这些，
 写 `x-permission` 即可。
 
@@ -193,7 +212,7 @@ func Register(g *echo.Group, h *Handler, mw Middlewares) {
 
 - 密码哈希是 Argon2id（`alexedwards/argon2id`，`internal/platform/crypto`），参数从配置
   （`ARGON2_*`）显式传入，不依赖库默认值，按部署环境内存和登录 QPS 压测调整。现在只有后台
-  员工的密码用它（P2 加前台密码时复用）；
+  员工的密码用它，前台加密码登录时复用同一组参数；
 - 停用前台用户必须同时吊销会话，并且两者原子完成；注销、踢下线同理；
 - **吊销立即生效**：前台鉴权每个请求按 `sid` 查 `user_sessions`，不做 access token 主动
   吊销，也不缓存会话查询结果（缓存的"写后删"窗口会让吊销不成立）；查询失败必须拒绝

@@ -13,6 +13,12 @@ func testRepository(t *testing.T) string {
 	files := map[string]string{
 		"internal/app/modules.go": `package app
 var moduleRequires = map[string][]string{"beta": {"gamma"}}
+type Modules struct {
+	Alpha *alpha.Module
+	Beta  *beta.Module
+	Gamma *gamma.Module
+	Staff *staff.Module
+}
 func build() {
 	alphaM := alpha.New()
 	betaM := beta.New(alphaM)
@@ -86,7 +92,7 @@ func TestComputeStaffRemovesAdminSurface(t *testing.T) {
 }
 
 func TestClosureRejectsUnknownModule(t *testing.T) {
-	if _, err := closure([]string{"auth"}, nil, []string{"missing"}); err == nil {
+	if _, err := closure([]string{"user"}, nil, []string{"missing"}); err == nil {
 		t.Fatal("unknown module should fail")
 	}
 }

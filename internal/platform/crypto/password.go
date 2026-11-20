@@ -1,5 +1,5 @@
 // Package crypto 提供 Argon2id 密码哈希和 JWT（HS256）签发/校验。它不认识
-// 任何业务模块，auth 模块的端口由它的方法签名直接满足。
+// 任何业务模块，staff 模块的端口由它的方法签名直接满足。
 package crypto
 
 import (

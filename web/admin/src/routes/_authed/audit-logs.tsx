@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { ScrollText } from "lucide-react";
 import { listAuditLogsMeta } from "@/api/meta.gen";
 import { AuditLogPage } from "@/features/audit-log/audit-log-page";
-import { page } from "@/features/auth/guard";
+import { page } from "@/lib/guard";
 
 export const Route = createFileRoute("/_authed/audit-logs")({
   ...page({ permission: "superadmin", nav: { title: "操作日志", icon: ScrollText, group: "系统", order: 3 } }),

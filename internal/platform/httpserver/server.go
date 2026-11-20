@@ -4,6 +4,7 @@ package httpserver
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -19,6 +20,7 @@ import (
 	"app.local/internal/config"
 	"app.local/internal/kit/lifecycle"
 	"app.local/internal/kit/logctx"
+	"app.local/internal/platform/ratelimit"
 )
 
 // APIPrefix 是全部业务路由的前缀，与 api/openapi.yaml 的 servers.url 一致。
@@ -144,17 +146,12 @@ func newServer(d common) (*echo.Echo, *prometheus.Registry, error) {
 	}
 	e.Use(secureMw)
 
+	if d.HTTP.GlobalRateLimitPerSecond <= 0 || d.HTTP.RequestTimeout <= 0 {
+		return nil, nil, errors.New("configure server: GlobalRateLimitPerSecond and RequestTimeout must be > 0 (validated by config)")
+	}
 	store := d.RateLimitStore
 	if store == nil {
-		rate := d.HTTP.GlobalRateLimitPerSecond
-		if rate <= 0 {
-			rate = 20
-		}
-		store = middleware.NewRateLimiterMemoryStoreWithConfig(middleware.RateLimiterMemoryStoreConfig{
-			Rate:      rate,
-			Burst:     int(rate) * 2,
-			ExpiresIn: 5 * time.Minute,
-		})
+		store = ratelimit.NewStore(nil, "global", ratelimit.PerSecond(d.HTTP.GlobalRateLimitPerSecond), d.Logger)
 	}
 	rateLimitMw, err := (middleware.RateLimiterConfig{
 		Skipper: func(c *echo.Context) bool {
@@ -181,13 +178,9 @@ func newServer(d common) (*echo.Echo, *prometheus.Registry, error) {
 	e.Use(metricsMw)
 
 	// Timeout 只让客户端提前拿到超时响应；释放服务端资源要靠 ctx 一路透传。
-	timeout := d.HTTP.RequestTimeout
-	if timeout <= 0 {
-		timeout = 10 * time.Second
-	}
 	timeoutMw, err := (middleware.ContextTimeoutConfig{
 		Skipper: healthEndpointSkipper,
-		Timeout: timeout,
+		Timeout: d.HTTP.RequestTimeout,
 	}).ToMiddleware()
 	if err != nil {
 		return nil, nil, fmt.Errorf("configure server: ContextTimeout: %w", err)

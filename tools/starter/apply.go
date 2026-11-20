@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"go/format"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -61,8 +62,14 @@ func editSpec(root, name, tag string) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, []byte(removeFromSpec(string(data), tag)), 0o644)
+	edited, err := removeFromSpec(string(data), tag)
+	if err != nil {
+		return fmt.Errorf("%s: %w", name, err)
+	}
+	return os.WriteFile(path, []byte(edited), 0o644)
 }
+
+var adminRegistrarLineRe = regexp.MustCompile(`\bm\.[A-Z][A-Za-z]*\.RegisterAdminHTTP,`)
 
 func removeAdminSurface(root string) error {
 	path := filepath.Join(root, "internal/app/modules.go")
@@ -71,12 +78,16 @@ func removeAdminSurface(root string) error {
 		return err
 	}
 	var out []string
-	for _, line := range strings.Split(string(data), "\n") {
-		if !regexp.MustCompile(`\bm\.[A-Z][A-Za-z]*\.RegisterAdminHTTP,`).MatchString(line) {
+	for line := range strings.SplitSeq(string(data), "\n") {
+		if !adminRegistrarLineRe.MatchString(line) {
 			out = append(out, line)
 		}
 	}
-	if err := os.WriteFile(path, []byte(strings.Join(out, "\n")), 0o644); err != nil {
+	formatted, err := format.Source([]byte(strings.Join(out, "\n")))
+	if err != nil {
+		return fmt.Errorf("format modules.go after removing admin surface: %w", err)
+	}
+	if err := os.WriteFile(path, formatted, 0o644); err != nil {
 		return err
 	}
 	entries, err := filepath.Glob(filepath.Join(root, "internal/modules/*/adminapi/oapi/config.yaml"))
@@ -126,13 +137,14 @@ func recordRemoved(root string, modules []string) error {
 	return os.WriteFile(filepath.Join(root, "starter-removed.yaml"), []byte(line), 0o644)
 }
 
-func generateAndTest(root string, skipFrontend ...bool) error {
+// generateAndTest 重新生成并跑测试；后台接入面被整体删掉时（adminSurfaceRemoved）没有前端可查。
+func generateAndTest(root string, adminSurfaceRemoved bool) error {
 	for _, command := range [][]string{{"go", "generate", "./api/"}, {"go", "vet", "./..."}, {"go", "test", "./..."}} {
 		if err := run(root, command...); err != nil {
 			return err
 		}
 	}
-	if len(skipFrontend) > 0 && skipFrontend[0] {
+	if adminSurfaceRemoved {
 		return nil
 	}
 	if _, err := os.Stat(filepath.Join(root, "web/admin/node_modules")); os.IsNotExist(err) && os.Getenv("CI") != "" {

@@ -19,6 +19,9 @@ pre-commit:
     shellcheck:
       glob: "*.sh"
       run: command -v shellcheck >/dev/null || exit 0; shellcheck -x {staged_files}
+    actionlint:
+      glob: ".github/workflows/*.{yml,yaml}"
+      run: make actionlint
     # 只提示可能受影响的文档，不拦截提交；逐篇核对见 docs/agents/workflow.md 的"文档"。
     doc-impact:
       run: scripts/doc-impact.sh --staged

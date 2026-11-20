@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -48,14 +49,14 @@ func TestWeChatWeb_Exchange(t *testing.T) {
 		"/sns/userinfo":            userInfoResp(""),
 	})
 	p := oauth.WeChatWeb(oauth.WeChatApp{AppID: testAppID, Secret: "s"}, srv.URL)
-	if p.SupportsPKCE() {
-		t.Error("微信不支持 PKCE，SupportsPKCE 应为 false")
+	if p.Capabilities() != (oauth.BrowserCapabilities{}) {
+		t.Error("微信不支持 PKCE 和 nonce，Capabilities 应为零值")
 	}
-	idn, err := p.Exchange(context.Background(), "code-1", "", "")
+	idn, err := p.Exchange(context.Background(), oauth.ExchangeParams{Code: "code-1"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if idn.Provider != oauth.LoginProviderWeChat || idn.Subject != "UNION-1" || idn.Name != "昵称" {
+	if idn.Provider != oauth.ProviderWeChat || idn.Subject != "UNION-1" || idn.Name != "昵称" {
 		t.Errorf("identity = %+v", idn)
 	}
 	if idn.WeChat == nil || idn.WeChat.AppID != testAppID || idn.WeChat.OpenID != "o1" {
@@ -131,7 +132,7 @@ func TestWeChat_Errors(t *testing.T) {
 			"/sns/userinfo":            `{"openid":"o1","nickname":"x"}`,
 		})
 		p := oauth.WeChatWeb(oauth.WeChatApp{AppID: testAppID, Secret: "s"}, srv.URL)
-		_, err := p.Exchange(context.Background(), "c", "", "")
+		_, err := p.Exchange(context.Background(), oauth.ExchangeParams{Code: "c"})
 		if !errors.Is(err, oauth.ErrNoUnionID) {
 			t.Errorf("error = %v, want ErrNoUnionID", err)
 		}
@@ -143,7 +144,7 @@ func TestWeChat_Errors(t *testing.T) {
 			"/sns/userinfo":            userInfoResp(`,"is_snapshotuser":1`),
 		})
 		p := oauth.WeChatWeb(oauth.WeChatApp{AppID: testAppID, Secret: "s"}, srv.URL)
-		_, err := p.Exchange(context.Background(), "c", "", "")
+		_, err := p.Exchange(context.Background(), oauth.ExchangeParams{Code: "c"})
 		if !errors.Is(err, oauth.ErrSnapshotUser) {
 			t.Errorf("error = %v, want ErrSnapshotUser", err)
 		}
@@ -156,7 +157,7 @@ func TestWeChat_Errors(t *testing.T) {
 			"/sns/userinfo":            userInfoResp(""),
 		})
 		p := oauth.WeChatMP(oauth.WeChatApp{AppID: testAppID, Secret: "s"}, srv.URL)
-		_, err := p.Exchange(context.Background(), "c", "", "")
+		_, err := p.Exchange(context.Background(), oauth.ExchangeParams{Code: "c"})
 		if !errors.Is(err, oauth.ErrSnapshotUser) {
 			t.Errorf("error = %v, want ErrSnapshotUser", err)
 		}
@@ -181,9 +182,44 @@ func TestWeChat_Errors(t *testing.T) {
 			"/sns/oauth2/access_token": `{"errcode":40029,"errmsg":"invalid code"}`,
 		})
 		p := oauth.WeChatWeb(oauth.WeChatApp{AppID: testAppID, Secret: "s"}, srv.URL)
-		_, err := p.Exchange(context.Background(), "bad", "", "")
+		_, err := p.Exchange(context.Background(), oauth.ExchangeParams{Code: "bad"})
 		if err == nil || !strings.Contains(err.Error(), "40029") {
 			t.Errorf("error = %v, want 含 errcode=40029", err)
 		}
 	})
+}
+
+// 快照页虚拟账号在回调参数里就能识别，不用换 token。
+func TestWeChatBrowser_RejectsSnapshotCallback(t *testing.T) {
+	p := oauth.WeChatMP(oauth.WeChatApp{AppID: "a", Secret: "s"}, "http://127.0.0.1:1")
+	_, err := p.Exchange(context.Background(), oauth.ExchangeParams{Code: "c", Callback: url.Values{"is_snapshotuser": {"1"}}})
+	if !errors.Is(err, oauth.ErrSnapshotUser) {
+		t.Fatalf("err = %v, want ErrSnapshotUser", err)
+	}
+}
+
+func TestWeChat_MissingCode(t *testing.T) {
+	app := oauth.WeChatApp{AppID: "a", Secret: "s"}
+	if _, err := oauth.WeChatWeb(app, "http://127.0.0.1:1").Exchange(context.Background(), oauth.ExchangeParams{}); !errors.Is(err, oauth.ErrMissingCredential) {
+		t.Errorf("浏览器缺 code: err = %v", err)
+	}
+	for name, n := range map[string]oauth.Native{"mini": oauth.WeChatMiniprogram(app, "http://127.0.0.1:1"), "app": oauth.WeChatAppNative(app, "http://127.0.0.1:1")} {
+		if _, err := n.VerifyNative(context.Background(), oauth.NativeCredential{IDToken: "x"}); !errors.Is(err, oauth.ErrMissingCredential) {
+			t.Errorf("%s 缺 code: err = %v", name, err)
+		}
+	}
+}
+
+// 网络错误不能把带 secret 的请求 URL 带进错误文字（错误会进日志）。
+func TestWeChat_NetworkErrorHidesSecret(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	srv.Close() // 连接被拒绝
+	p := oauth.WeChatWeb(oauth.WeChatApp{AppID: "wx-app", Secret: "TOP-SECRET-VALUE"}, srv.URL)
+	_, err := p.Exchange(context.Background(), oauth.ExchangeParams{Code: "c"})
+	if err == nil {
+		t.Fatal("连不上时应返回错误")
+	}
+	if strings.Contains(err.Error(), "TOP-SECRET-VALUE") {
+		t.Fatalf("错误文字泄露了 secret：%v", err)
+	}
 }

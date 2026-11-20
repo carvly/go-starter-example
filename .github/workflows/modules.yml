@@ -1,6 +1,6 @@
 name: Modules
 
-# 对每个模块演练一次删除（scripts/check-module-removal.sh），约 1 分钟，只在可能
+# 对每个模块演练一次删除（scripts/check-module-removal.sh → go run ./tools/starter check），约 1 分钟，只在可能
 # 影响模块边界的路径变化时运行（含后台页面：演练会删掉模块的页面再做类型检查）。
 on:
   push:
@@ -11,6 +11,7 @@ on:
       - "web/admin/src/**"
       - "web/admin/scripts/**"
       - "scripts/check-module-removal.sh"
+      - "tools/starter/**"
       - ".github/workflows/modules.yml"
   pull_request:
     paths:
@@ -19,6 +20,7 @@ on:
       - "web/admin/src/**"
       - "web/admin/scripts/**"
       - "scripts/check-module-removal.sh"
+      - "tools/starter/**"
       - ".github/workflows/modules.yml"
 
 # GITHUB_TOKEN 只给读权限：这些 job 都不需要写仓库。

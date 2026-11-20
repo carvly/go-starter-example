@@ -27,10 +27,10 @@
 
 ## 例子
 
-- `internal/modules/auth/domain/account.go` 的 `DeleteMe`：注销写操作和事件入队同事务；
+- `internal/modules/user/domain/account.go` 的 `DeleteMe`：注销写操作和事件入队同事务；
 - `internal/modules/staff/domain/service.go` 的 `Disable`：在锁里检查至少留下一个超级管理员、
   改状态、吊销会话同事务；
-- 一条语句就能写完的不需要开事务：`internal/modules/auth/postgres/repository.go` 的 `Disable`
+- 一条语句就能写完的不需要开事务：`internal/modules/user/postgres/repository.go` 的 `Disable`
   用数据修改的 CTE 在同一条语句里改用户状态并吊销会话；
 - `internal/modules/staff/domain/service.go` 的 `ResetPassword`：重设密码、启用账号、
   吊销会话和写操作日志同事务。

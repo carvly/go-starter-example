@@ -44,6 +44,49 @@
           }
         ]
       }
+    },
+    {
+      "files": ["src/features/**"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": [
+                  "@base-ui/react",
+                  "@base-ui/react/*",
+                  "@tanstack/react-table",
+                  "@tanstack/react-form",
+                  "react-day-picker",
+                  "react-day-picker/*"
+                ],
+                "message": "features 和 routes 只经 src/components/ 的公共组件使用 Base UI、TanStack Table、TanStack Form、react-day-picker（统一外观和行为，见 docs/agents/admin.md）"
+              },
+              {
+                "group": ["@/features/*/*"],
+                "message": "Feature 之间只经对方的公开出口 @/features/<名字>（index.ts）引用，不深入内部文件；会话用 @/lib/session（见 docs/agents/admin.md 的“Feature 与状态边界”）"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": ["src/components/**", "src/lib/**"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": ["@/features", "@/features/*", "@/features/**"],
+                "message": "components/ 和 lib/ 是通用目录，不得反向依赖 features/（见 docs/agents/admin.md 的“Feature 与状态边界”）"
+              }
+            ]
+          }
+        ]
+      }
     }
   ]
 }

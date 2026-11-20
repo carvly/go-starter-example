@@ -4,8 +4,8 @@ import { KeyRound } from "lucide-react";
 import { useVisibleNav } from "@/components/layout/use-visible-nav";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { useMe } from "@/features/auth/queries";
-import { RoleFlowGuide } from "@/features/staff/role-guide";
+import { useMe } from "@/lib/session";
+import { RoleFlowGuide } from "@/features/roles";
 
 // 首页：能进入的页面做成入口（和侧边栏同一份数据）。一个都没有时说明原因和怎么办：
 // 没有角色、或角色还没勾选权限的员工登录后只能看到这里。

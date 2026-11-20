@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { z } from "zod";
 
 import { ChangePasswordPage } from "@/features/auth/change-password-page";
-import { loadMe } from "@/features/auth/guard";
+import { loadMe } from "@/lib/guard";
 
 export const Route = createFileRoute("/change-password")({
   validateSearch: z.object({ redirect: z.string().optional() }),

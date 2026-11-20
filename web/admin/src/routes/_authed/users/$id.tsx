@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 
-import { page } from "@/features/auth/guard";
+import { page } from "@/lib/guard";
 import { UserDetailPage } from "@/features/users/detail";
 import { userQuery } from "@/features/users/queries";
 

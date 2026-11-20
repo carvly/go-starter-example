@@ -63,7 +63,7 @@ spec 一致，并检查 spec 符合下面依赖的约定（见 [http.md](http.md
 ## 本地开发
 
 1. 起后端，打开后台 server：`HTTP_ADMIN_ADDR=127.0.0.1:8081`、
-   `HTTP_ADMIN_ORIGIN=http://localhost:5173`。前台登录的 `AUTH_PUBLIC_BASE_URL`（如
+   `HTTP_ADMIN_ORIGIN=http://localhost:5173`。前台登录的 `USER_PUBLIC_BASE_URL`（如
    `http://localhost:8080`）是必需项，缺了 api 起不来；`WECHAT_*` 只开发后台时不用配
    （变量见 `configs/.env.example`，compose 里已经给了默认值）。首个管理员用
    `api staff create -username root` 创建；
@@ -89,7 +89,7 @@ spec 一致，并检查 spec 符合下面依赖的约定（见 [http.md](http.md
 ```
 web/admin/src/
   routes/          TanStack Router 文件路由，只做路由声明；_authed.tsx 是需要登录的布局
-  features/<功能>/  页面、zod schema、query hooks（auth、staff、roles、audit-log、settings、
+  features/<功能>/  页面、zod schema、query hooks（auth（员工登录）、staff、roles、audit-log、settings、
                    accounts、roles…）
   components/      公共组件，按字段类型（generator.md 的"字段类型矩阵"）各提供表单字段、单元格、筛选控件：
                    form/（表单入口和字段）、data-table/（服务端分页表格、cells.tsx 单元格）、
@@ -107,25 +107,50 @@ web/admin/src/
 `no-restricted-imports`），外观和行为才统一。页面不设最大宽度，随侧边栏展开、收起占满内容区；内容区（`SidebarInset`）带 `min-w-0`，
 比内容区宽的表格在表格自己的容器里横向滚动，不把整页撑宽。
 
+## Feature 与状态边界
+
+- 业务代码按 `web/admin/src/features/<feature>/` 和对应路由组织，页面、查询、表单和测试随 Feature 内聚；
+- Feature 之间不深入对方内部目录引用组件、Hooks 或状态。Feature 确实需要对外提供能力时才建公开出口
+  `features/<名字>/index.ts`（如 `features/roles/index.ts`、`features/staff/index.ts`），其它 Feature 只能
+  `import ... from "@/features/<名字>"`；没有外部使用者的 Feature 不建。`routes/` 是页面组合点，可以引用
+  Feature 的页面和路由所需查询，不属于跨 Feature 的业务复用；
+- 当前员工、权限码、登出是后台外壳的会话契约，放在 `src/lib/session.ts`，布局、路由守卫和各 Feature
+  都从这里读；
+- 跨 Feature 复用先判断是否具有稳定的通用语义。“出现三次”是检查重复的信号，不是机械门槛；
+  `components/`、`lib/` 等通用目录不得反向 import `features/`；
+- 基础 UI 组件只负责展示和交互事件，不直接发起业务 API 请求或读取业务全局状态。Feature 组件可以承担
+  页面组合和少量局部交互，不为了形式把所有逻辑都抽成 Hook；
+- 数据查询、缓存失效和复杂异步流程集中在 Feature 的查询模块或 Custom Hooks 中。表单校验和局部状态靠近
+  使用位置，只有真实复用或复杂度需要时才提取；不按机械行数制造细碎组件；
+- 服务端状态由 TanStack Query 管理，URL 表达可导航、可分享的界面状态，局部状态就近使用 `useState`，
+  只有跨路由、跨页面且确属客户端会话的状态才考虑全局 Store；
+- TypeScript 类型从 OpenAPI 生成，不手工维护重复 DTO。不用 `any` 绕过检查，外部输入优先用 `unknown`
+  加运行时校验，类型断言必须能说明依据；
+- 兼容性按操作语义判断，不是新增字段一律可选：请求新增必需字段通常破坏兼容；响应新增字段要考虑
+  客户端处理；删除、重命名、改变含义、收紧校验、修改权限和错误码都要显式评估。
+
+两条依赖方向由 oxlint 的 `no-restricted-imports` 检查（`.oxlintrc.json`）：`src/features/**` 不能引用
+`@/features/*/*`（只能经公开出口），`src/components/**`、`src/lib/**` 不能引用 `@/features`。
+
 ## 页面、权限与菜单
 
 数据库里没有菜单和权限定义：权限码只有 `admin.yaml` 的 `x-permission` 一个来源，菜单写在前端路由里，
 都随代码发布、可以 review，不会出现数据库配置和代码不一致；角色只存权限码字符串。
 
-- 页面路由用 `page({ permission, nav })`（`src/features/auth/guard.ts`）生成 `staticData` 和
+- 页面路由用 `page({ permission, nav })`（`src/lib/guard.ts`，后台外壳所有）生成 `staticData` 和
   `beforeLoad`：权限只写一处，路由守卫和侧边栏都从这里取。`permission` 取值同
   `x-permission`：不写或 `authenticated` 登录即可，`superadmin` 只有超级管理员，其余是权限码。
 - 侧边栏从路由树收集带 `nav` 的路由，按当前员工的权限过滤、按 `group` / `order` 排列（分组的
   先后固定为常用、业务、系统，见 `permissions.ts` 的 `groupOrder`）
   （`src/lib/permissions.ts` 的 `visibleNav`）。新增页面只在路由上写 `nav`，不改共享的菜单数据。
-- 当前员工和权限码只来自 `meQuery`、`permissionsQuery`（`src/features/auth/queries.ts`），不用
+- 当前员工和权限码只来自 `meQuery`、`permissionsQuery`（`src/lib/session.ts`，后台外壳的会话契约），不用
   全局状态库。登录时清空全部缓存，换身份不会看到上一个人的数据。
 - 员工和角色之间的引导：员工列表的"角色"列和顶部提示标出没有角色的启用员工（`needsRole`，
   接口的员工列表带 `role_ids`）和没勾选权限的角色；新建普通员工后，临时密码对话框引导去分配
   角色（还没有角色时去新建）；员工详情、角色页标出"未分配角色""未设置权限"；首页列出当前员工
   能进入的页面（和侧边栏同一份数据，`useVisibleNav`），一个都没有时说明原因、让他联系超级
   管理员。流程说明只写在 `src/features/staff/role-guide.tsx`，各处共用。
-- 页面里的按钮按权限显隐用 `useCan(权限码)`（`src/features/auth/queries.ts`），规则同路由守卫。
+- 页面里的按钮按权限显隐用 `useCan(权限码)`（`src/lib/session.ts`），规则同路由守卫。
 - 前端的权限判断只决定显示什么，真正的拦截在后端。
 
 ## 错误处理

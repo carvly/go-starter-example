@@ -28,7 +28,7 @@
   <div class="diagram-container">
   <svg viewBox="0 0 1000 512" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="architecture-modules-title architecture-modules-desc">
   <title id="architecture-modules-title">go-starter 的模块协作</title>
-  <desc id="architecture-modules-desc">五个业务模块之间的依赖：order 经 ProductLookup 查商品，fulfillment 经 StockReserver 扣库存、经 EventLedger 去重、经 order 的 Service 确认或标记失败，这些都由 internal/app 注入；order 发布的 order_created 事件由 fulfillment 消费；auth 和 staff 不引用其它模块，staff 的 AdminGuard 保护全部后台路由。</desc>
+  <desc id="architecture-modules-desc">五个业务模块之间的依赖：order 经 ProductLookup 查商品，fulfillment 经 StockReserver 扣库存、经 EventLedger 去重、经 order 的 Service 确认或标记失败，这些都由 internal/app 注入；order 发布的 order_created 事件由 fulfillment 消费；user 和 staff 不引用其它模块，staff 的 AdminGuard 保护全部后台路由。</desc>
   <defs>
     <marker id="arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#4f5d75"/></marker>
     <marker id="arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#bf4520"/></marker>
@@ -89,12 +89,12 @@
     <text x="840" y="182" fill="#4f5d75" font-size="10" text-anchor="middle">商品，Redis 缓存，并发安全扣库存</text>
     <text x="840" y="198" fill="#5a6580" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">products</text>
 
-    <!-- auth -->
+    <!-- user -->
     <rect x="40" y="296" width="440" height="72" rx="6" fill="#f5f5f5"/>
     <rect x="40" y="296" width="440" height="72" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
     <rect x="48" y="302" width="100" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.40)" stroke-width="0.8"/>
     <text x="98" y="311" fill="rgba(45,49,66,0.8)" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">HTTP · ADMIN · JOB</text>
-    <text x="260" y="326" fill="#2d3142" font-size="13" font-weight="600" text-anchor="middle">auth</text>
+    <text x="260" y="326" fill="#2d3142" font-size="13" font-weight="600" text-anchor="middle">user</text>
     <text x="260" y="342" fill="#4f5d75" font-size="10" text-anchor="middle">前台用户：微信登录、会话、鉴权中间件、接口限流（Redis）；注销发布 user_deleted</text>
     <text x="260" y="358" fill="#5a6580" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">users · user_sessions · user_identities · wechat_openids · oauth_states</text>
 
@@ -122,7 +122,7 @@
   </g>
   </svg>
   </div>
-  <p class="note">模块之间不互相 import：消费方定义窄接口，组合根注入提供方。需要翻译错误时由 <code>internal/app/adapters_*.go</code> 包一层（<code>ProductLookup</code>、<code>StockReserver</code>）；签名正好吻合时直接注入（order 的 Service 和 EventLedger）。唯一允许的跨模块 import 是对方的 <code>events</code> 包。fulfillment 没有自己的表，写入都经 order、product 落到它们登记的表里。auth 的 <code>user_deleted</code> 目前由 auth 自己消费；以后持有用户数据的模块提供 <code>UserDataCleaner</code>，在组合根接上。</p>
+  <p class="note">模块之间不互相 import：消费方定义窄接口，组合根注入提供方。需要翻译错误时由 <code>internal/app/adapters_*.go</code> 包一层（<code>ProductLookup</code>、<code>StockReserver</code>）；签名正好吻合时直接注入（order 的 Service 和 EventLedger）。唯一允许的跨模块 import 是对方的 <code>events</code> 包。fulfillment 没有自己的表，写入都经 order、product 落到它们登记的表里。user 的 <code>user_deleted</code> 目前由 user 自己消费；以后持有用户数据的模块提供 <code>UserDataCleaner</code>，在组合根接上。</p>
 </div>
 </body>
 </html>

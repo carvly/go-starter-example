@@ -25,7 +25,7 @@ import (
 type Deps struct {
 	DB     *dbtx.Handle
 	Config Config
-	// Argon2 与前台用户共用同一组哈希参数。
+	// Argon2 是基础设施配置里的密码哈希参数（按部署硬件调优，不属于某个模块）。
 	Argon2 config.Argon2Params
 	// Operations 来自 api/admin.yaml，用于权限映射和可授予的权限码清单。
 	Operations []httpserver.AdminOperation
@@ -73,8 +73,8 @@ func (m *Module) RegisterAdminHTTP(g *echo.Group) {
 }
 
 // RegisterJobs 注册操作日志清理任务的 worker。
-func (m *Module) RegisterJobs(workers *river.Workers) {
-	river.AddWorker(workers, jobs.NewAuditCleanupWorker(m.Service, m.cfg.AuditRetention))
+func (m *Module) RegisterJobs(workers *queue.Workers) {
+	queue.AddWorker(workers, jobs.NewAuditCleanupWorker(m.Service, m.cfg.AuditRetention))
 }
 
 // PeriodicJobs 每天清理一次超过保留期的操作日志，进程启动时先跑一次。

@@ -29,9 +29,9 @@ tags:
   - name: orders
     summary: 订单
     description: 订单（internal/modules/order）
-  - name: auth
-    summary: 登录与会话
-    description: 前台用户的登录（微信各入口）、会话和账号（internal/modules/auth）
+  - name: user
+    summary: 用户：登录与会话
+    description: 前台用户的登录（微信各入口）、会话和账号（internal/modules/user）
 
 security:
   - bearerAuth: []
@@ -146,7 +146,7 @@ paths:
   /auth/oauth/{provider}/authorize:
     get:
       operationId: authorizeOAuth
-      tags: [auth]
+      tags: [user]
       summary: 发起浏览器授权（整页跳转到第三方授权页）
       description: |
         登录（未登录）、绑定和重新验证共用这一条流程，intent 由调用方决定：登录
@@ -182,13 +182,13 @@ paths:
   /auth/oauth/{provider}/callback:
     get:
       operationId: oauthCallback
-      tags: [auth]
+      tags: [user]
       summary: 第三方授权回调
       description: |
         校验一次性 state 和浏览器绑定 cookie。登录 intent 把结果写成一次性
         兑换（60 秒）并跳回前端 /auth/complete?intent=login&code=...；绑定和
         重新验证 intent 在这里直接完成并跳回 /auth/complete?intent=...&result=...。
-        服务号网页快照页（is_snapshotuser=1）一律拒绝。
+        provider 专有的回调参数由 provider 处理（如微信服务号网页快照页 is_snapshotuser=1 一律拒绝）。
       security: []
       parameters:
         - name: provider
@@ -222,11 +222,42 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "429":
           $ref: "#/components/responses/TooManyRequests"
+    post:
+      operationId: oauthCallbackForm
+      tags: [user]
+      summary: 第三方授权回调（表单 POST）
+      description: |
+        response_mode=form_post 的 provider 用跨站表单 POST 回调，校验和后续处理与 GET 回调完全相同。
+        这是唯一不限定 application/json 的写操作：防护由一次性 state 和浏览器绑定 cookie 承担。
+      security: []
+      parameters:
+        - name: provider
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: "#/components/schemas/OAuthCallbackForm"
+      responses:
+        "302":
+          description: 跳回前端的 /auth/complete
+          headers:
+            Location:
+              schema:
+                type: string
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
 
   /auth/oauth/exchange:
     post:
       operationId: exchangeOAuth
-      tags: [auth]
+      tags: [user]
       summary: 兑换浏览器登录结果
       description: |
         浏览器登录的最后一步：前端用回调带回的一次性兑换码发同站请求，
@@ -253,10 +284,38 @@ paths:
         "429":
           $ref: "#/components/responses/TooManyRequests"
 
+  /auth/native/{provider}/nonce:
+    post:
+      operationId: issueNativeNonce
+      tags: [user]
+      summary: 签发原生登录用的一次性 nonce
+      description: |
+        要求 nonce 的 provider（OIDC id_token）先调本接口，把 nonce 交给 SDK，再把它随凭证提交。
+        nonce 绑定 provider、5 分钟有效、只能用一次，截获的 id_token 因此无法重放。不要求 nonce 的 provider
+        返回 400。
+      security: []
+      parameters:
+        - name: provider
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: 签发成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NativeNonceResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+
   /auth/native/{provider}/login:
     post:
       operationId: nativeLogin
-      tags: [auth]
+      tags: [user]
       summary: 原生 SDK 登录（小程序 wx.login / App SDK 授权）
       security: []
       parameters:
@@ -289,7 +348,7 @@ paths:
   /auth/session/refresh:
     post:
       operationId: refreshSession
-      tags: [auth]
+      tags: [user]
       summary: 轮换 refresh token 并签发新 access token
       description: |
         出示的 refresh token 既不是当前值、也不是宽限期内的上一代时，判定为
@@ -317,7 +376,7 @@ paths:
   /auth/session/logout:
     post:
       operationId: logout
-      tags: [auth]
+      tags: [user]
       summary: 登出（吊销会话）
       description: access token 过期了也能登出：只认 refresh token。
       security: []
@@ -338,7 +397,7 @@ paths:
   /me:
     patch:
       operationId: updateMe
-      tags: [auth]
+      tags: [user]
       summary: 修改昵称和头像
       requestBody:
         required: true
@@ -357,7 +416,7 @@ paths:
           $ref: "#/components/responses/BadRequest"
     delete:
       operationId: deleteMe
-      tags: [auth]
+      tags: [user]
       summary: 注销账号
       description: |
         要求最近重新验证过身份（†）。注销是账号级状态变更，吊销全部会话、删除
@@ -373,7 +432,7 @@ paths:
   /me/identities:
     get:
       operationId: listMyIdentities
-      tags: [auth]
+      tags: [user]
       summary: 列出当前账号的登录方式
       description: 按绑定时间倒序。
       parameters:
@@ -394,7 +453,7 @@ paths:
   /me/identities/oauth/{provider}:
     post:
       operationId: bindIdentityOAuth
-      tags: [auth]
+      tags: [user]
       summary: 发起浏览器绑定第三方登录方式
       description: 返回 authorize_url，整页跳转到第三方授权页，回调里完成绑定。
       parameters:
@@ -419,7 +478,7 @@ paths:
   /me/identities/native/{provider}:
     post:
       operationId: bindIdentityNative
-      tags: [auth]
+      tags: [user]
       summary: 原生 SDK 绑定第三方登录方式
       parameters:
         - name: provider
@@ -449,7 +508,7 @@ paths:
   /me/identities/{id}:
     delete:
       operationId: unbindIdentity
-      tags: [auth]
+      tags: [user]
       summary: 解绑登录方式
       description: 拒绝解绑最后一种登录方式；解绑微信时同时删除该账号的全部微信 openid。
       parameters:
@@ -467,7 +526,7 @@ paths:
   /me/reauthenticate/oauth/{provider}:
     post:
       operationId: reauthenticateOAuth
-      tags: [auth]
+      tags: [user]
       summary: 发起浏览器重新验证
       description: 返回 authorize_url；回调完成验证后更新会话的 auth_time。仅当账号没有
         密码、邮箱、手机号等更强凭据时可用（P1a 的账号只有微信登录方式）。
@@ -491,7 +550,7 @@ paths:
   /me/reauthenticate/native/{provider}:
     post:
       operationId: reauthenticateNative
-      tags: [auth]
+      tags: [user]
       summary: 原生 SDK 重新验证
       description: 校验凭证必须返回当前账号自己的 (provider, subject)，成功后更新会话的 auth_time。
       parameters:
@@ -516,7 +575,7 @@ paths:
   /me/sessions:
     get:
       operationId: listMySessions
-      tags: [auth]
+      tags: [user]
       summary: 列出当前账号的登录会话（设备列表）
       description: 只列未吊销的会话，按登录时间倒序。
       parameters:
@@ -537,7 +596,7 @@ paths:
   /me/sessions/{id}:
     delete:
       operationId: revokeMySession
-      tags: [auth]
+      tags: [user]
       summary: 踢下线（吊销指定会话）
       parameters:
         - $ref: "#/components/parameters/ID"
@@ -691,14 +750,38 @@ components:
 
     NativeLoginRequest:
       type: object
-      required: [code, client]
+      required: [client]
       properties:
         code:
           examples: ["071xyz"]
           type: string
           minLength: 1
+          description: 授权码（微信 wx.login / SDK 授权返回的 code）。需要哪些凭证字段由 provider 决定，微信只需 code。
           x-oapi-codegen-extra-tags:
-            validate: "required,min=1"
+            validate: "omitempty,min=1"
+        id_token:
+          examples: ["eyJhbGciOi..."]
+          type: string
+          minLength: 1
+          maxLength: 8192
+          description: OIDC id_token（使用 id_token 的 provider 才需要）。
+          x-oapi-codegen-extra-tags:
+            validate: "omitempty,min=1,max=8192"
+        nonce:
+          examples: ["3f9c0e..."]
+          type: string
+          minLength: 1
+          maxLength: 128
+          description: 先调 POST /v1/auth/native/{provider}/nonce 取得的一次性 nonce（要求 nonce 的 provider 才需要）。
+          x-oapi-codegen-extra-tags:
+            validate: "omitempty,min=1,max=128"
+        name:
+          examples: ["张三"]
+          type: string
+          maxLength: 128
+          description: 客户端提交的姓名（部分 provider 只在首次授权时给出），只作昵称参考。
+          x-oapi-codegen-extra-tags:
+            validate: "omitempty,max=128"
         client:
           examples: ["miniprogram"]
           type: string
@@ -714,14 +797,30 @@ components:
 
     NativeBindRequest:
       type: object
-      required: [code]
       properties:
         code:
           examples: ["071xyz"]
           type: string
           minLength: 1
+          description: 授权码（微信 wx.login / SDK 授权返回的 code）。需要哪些凭证字段由 provider 决定，微信只需 code。
           x-oapi-codegen-extra-tags:
-            validate: "required,min=1"
+            validate: "omitempty,min=1"
+        id_token:
+          examples: ["eyJhbGciOi..."]
+          type: string
+          minLength: 1
+          maxLength: 8192
+          description: OIDC id_token（使用 id_token 的 provider 才需要）。
+          x-oapi-codegen-extra-tags:
+            validate: "omitempty,min=1,max=8192"
+        nonce:
+          examples: ["3f9c0e..."]
+          type: string
+          minLength: 1
+          maxLength: 128
+          description: 先调 POST /v1/auth/native/{provider}/nonce 取得的一次性 nonce（要求 nonce 的 provider 才需要）。
+          x-oapi-codegen-extra-tags:
+            validate: "omitempty,min=1,max=128"
 
     RefreshRequest:
       type: object
@@ -765,6 +864,27 @@ components:
           examples: ["/orders"]
           type: string
           description: 浏览器登录时发起方传入的站内跳转路径。
+
+    OAuthCallbackForm:
+      type: object
+      required: [state]
+      description: response_mode=form_post 时第三方 POST 回来的表单；其余字段（如 user、id_token）原样交给 provider。
+      additionalProperties:
+        type: string
+      properties:
+        state:
+          type: string
+        code:
+          type: string
+
+    NativeNonceResponse:
+      type: object
+      required: [nonce]
+      properties:
+        nonce:
+          examples: ["3f9c0e..."]
+          type: string
+          description: 一次性 nonce，5 分钟内用于一次原生登录、绑定或重新验证。
 
     OAuthStartResponse:
       type: object

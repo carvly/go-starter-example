@@ -1,10 +1,13 @@
 package resource
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"go/format"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -12,7 +15,7 @@ import (
 	"slices"
 	"strings"
 
-	"go.yaml.in/yaml/v4"
+	"app.local/tools/internal/specmap"
 )
 
 // Plan 是生成之前的完整规划：推出的名字、要新建的文件、要插入的位置。写入之前先算好，任何
@@ -91,50 +94,30 @@ func (r *Repo) MakePlan(p *Parsed, hints []Problem) (*Plan, error) {
 		Insert{File: m.N.Spec, Section: "paths", After: at["paths"], Text: paths},
 		Insert{File: m.N.Spec, Section: "components.schemas", After: at["schemas"], Text: schemas},
 	)
+	if len(m.WebAuth) > 0 {
+		provider, err := r.userAuthModule()
+		if err != nil || provider == "" {
+			return nil, fmt.Errorf("%w：web.auth 需要提供前台登录检查的模块（先跑 check 看 REPO-AUTH-MISSING）", ErrEnv)
+		}
+		m.WebAuthModule = provider
+	}
 	pl.Insert = append(pl.Insert, r.modulesInserts(m)...)
 	return pl, nil
 }
 
 // specSections 返回 tags、paths、components.schemas 三段各自最后一行内容的行号：新内容插在它
-// 后面。用 yaml.Node 定位，再按行插入文本，不重新序列化整份文件，已有内容的格式不变。
+// 们后面（跳过段末的空行和注释，注释通常属于下一段）。
 func specSections(spec []byte) (map[string]int, error) {
-	var root yaml.Node
-	if err := yaml.Unmarshal(spec, &root); err != nil {
+	doc, err := specmap.Parse(spec)
+	if err != nil {
 		return nil, err
 	}
-	lines := strings.Split(string(spec), "\n")
-	doc := root.Content[0]
-	at := map[string]int{}
-	end := func(m *yaml.Node, i int) int { // 第 i 个键的值结束于下一个键之前（跳过空行和注释）
-		next := len(lines) + 1
-		if i+2 < len(m.Content) {
-			next = m.Content[i+2].Line
-		}
-		l := next - 1
-		for l > 0 && (strings.TrimSpace(lines[l-1]) == "" || strings.HasPrefix(strings.TrimSpace(lines[l-1]), "#")) {
-			l--
-		}
-		return l
-	}
-	for i := 0; i+1 < len(doc.Content); i += 2 {
-		switch doc.Content[i].Value {
-		case "tags", "paths":
-			at[doc.Content[i].Value] = end(doc, i)
-		case "components":
-			c := doc.Content[i+1]
-			for j := 0; j+1 < len(c.Content); j += 2 {
-				if c.Content[j].Value == "schemas" {
-					at["schemas"] = end(c, j)
-				}
-			}
-		}
-	}
 	for _, k := range []string{"tags", "paths", "schemas"} {
-		if at[k] == 0 {
+		if doc.SectionEnd[k] == 0 {
 			return nil, fmt.Errorf("找不到 %s 段，无法插入", k)
 		}
 	}
-	return at, nil
+	return doc.SectionEnd, nil
 }
 
 // modulesInserts 是 internal/app/modules.go 里按硬规则 3 的固定几行。
@@ -142,7 +125,7 @@ func (r *Repo) modulesInserts(m *Model) []Insert {
 	n := m.N
 	deps := "DB: in.DBTx"
 	if len(m.WebAuth) > 0 {
-		deps += ", Auth: authM.Middleware()"
+		deps += ", Auth: " + m.WebAuthModule + "M.Middleware()"
 	}
 	reg, list := "m."+n.ModuleField+".RegisterAdminHTTP,", "adminRegistrars"
 	if !m.Admin {
@@ -250,7 +233,7 @@ func (r *Repo) Apply(pl *Plan, descriptor []byte, log func(string)) (*Result, er
 	if err := r.CheckWorkspace(createdRoots(pl)); err != nil {
 		return nil, err
 	}
-	res := &Result{Plan: pl, Revert: r.revert(pl)}
+	res := &Result{Plan: pl, Revert: "go run ./tools/gen revert <描述文件>"}
 	// 先算好所有共享文件的新内容，全部成功再写。
 	shared := map[string]string{}
 	var specIns []Insert
@@ -275,6 +258,10 @@ func (r *Repo) Apply(pl *Plan, descriptor []byte, log func(string)) (*Result, er
 		if shared[file], err = insertModules(string(content), inserts); err != nil {
 			return nil, err
 		}
+	}
+	// 写入前留一份原样：revert 按它还原，生成前已有的未提交改动不会丢。
+	if err := r.saveBefore(pl, slices.Sorted(maps.Keys(shared))); err != nil {
+		return nil, err
 	}
 	for _, f := range pl.files {
 		if err := os.MkdirAll(filepath.Dir(r.path(f.Path)), 0o755); err != nil {
@@ -313,7 +300,47 @@ func (r *Repo) Apply(pl *Plan, descriptor []byte, log func(string)) (*Result, er
 		}
 	}
 	res.Todo = append(res.Todo, todos(m)...)
+	if err := r.recordApplied(pl.Names.Resource); err != nil {
+		return res, err
+	}
 	return res, nil
+}
+
+// recordApplied 在 apply 成功结束时记下要还原的文件的内容摘要：之后这些文件再被改过（手改、又生成了别的资源），
+// revert 会拒绝整文件还原，不悄悄抹掉后来的改动。
+func (r *Repo) recordApplied(resource string) error {
+	path := filepath.Join(BeforeDir(r.Root, resource), "manifest.json")
+	m, err := readManifest(path)
+	if err != nil {
+		return err
+	}
+	m.Applied = map[string]string{}
+	for _, p := range m.Restore {
+		data, err := os.ReadFile(r.path(p))
+		if err != nil {
+			return err
+		}
+		m.Applied[p] = secrandHash(data)
+	}
+	out, err := json.MarshalIndent(m, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, out, 0o644)
+}
+
+func readManifest(path string) (revertManifest, error) {
+	var m revertManifest
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return m, err
+	}
+	return m, json.Unmarshal(data, &m)
+}
+
+func secrandHash(data []byte) string {
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:])
 }
 
 // frontend 重新生成接口类型和路由树，格式化生成的页面（快照随之更新为格式化后的内容），再做类型检查。
@@ -379,15 +406,97 @@ func (r *Repo) run(args ...string) (string, error) {
 	return string(out), err
 }
 
-// revert 是这一次的精确回退命令：删掉新建的文件，还原被插入的共享文件。不用 git clean：
-// 它会删掉与这次生成无关的未跟踪文件。
-func (r *Repo) revert(pl *Plan) string {
-	rm := createdRoots(pl)
-	co := []string{pl.Names.Spec, "internal/app/modules.go", "internal/app/migrate.go"}
+// revertManifest 记下一次生成新建了哪些路径、改了哪些已有文件（原样存在 BeforeDir 下）。
+type revertManifest struct {
+	Created []string `json:"created"`
+	Restore []string `json:"restore"`
+	// Applied 是 apply 成功结束时每个要还原的文件的内容摘要。为空表示 apply 没有走完，revert 无条件还原。
+	Applied map[string]string `json:"applied,omitempty"`
+}
+
+// BeforeDir 是一次生成写入前的原样：被插入的共享文件和会被重新生成的派生文件。
+func BeforeDir(root, resource string) string {
+	return filepath.Join(root, ".gen", resource, "before")
+}
+
+// saveBefore 保存将被修改的已有文件的原样。派生文件（meta.gen.ts、schema.d.ts、routeTree.gen.ts）也存：
+// 还原原样比重新生成可靠，不依赖 web/admin 装没装依赖。
+func (r *Repo) saveBefore(pl *Plan, shared []string) error {
+	restore := slices.Clone(shared)
 	if pl.model.Admin {
-		co = append(co, AdminDir+"src/api/meta.gen.ts", AdminDir+"src/api/schema.d.ts", AdminDir+"src/routeTree.gen.ts")
+		restore = append(restore, AdminDir+"src/api/meta.gen.ts", AdminDir+"src/api/schema.d.ts", AdminDir+"src/routeTree.gen.ts")
 	}
-	return "rm -r " + strings.Join(rm, " ") + " && git checkout -- " + strings.Join(co, " ")
+	dir := BeforeDir(r.Root, pl.Names.Resource)
+	if err := os.RemoveAll(dir); err != nil {
+		return err
+	}
+	var kept []string
+	for _, p := range restore {
+		data, err := os.ReadFile(r.path(p))
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		dst := filepath.Join(dir, "files", p)
+		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+			return err
+		}
+		if err := os.WriteFile(dst, data, 0o644); err != nil {
+			return err
+		}
+		kept = append(kept, p)
+	}
+	m, err := json.MarshalIndent(revertManifest{Created: createdRoots(pl), Restore: kept}, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(dir, "manifest.json"), m, 0o644)
+}
+
+// Revert 精确回退一次生成：删掉新建的路径，把改过的已有文件还原成生成前的原样，然后删掉这次的 .gen 记录。
+// 生成之后又手改了共享文件的话，那些改动会随还原丢失。不用 git checkout / git clean：它们会连带丢掉或删掉
+// 与这次生成无关的改动和文件。
+func (r *Repo) Revert(resource string) ([]string, error) {
+	dir := BeforeDir(r.Root, resource)
+	m, err := readManifest(filepath.Join(dir, "manifest.json"))
+	if os.IsNotExist(err) {
+		return nil, fmt.Errorf("%w：没有 %s 的生成记录（%s），无法精确回退", ErrEnv, resource, dir)
+	}
+	if err != nil {
+		return nil, err
+	}
+	var changed []string
+	for p, want := range m.Applied {
+		data, err := os.ReadFile(r.path(p))
+		if err != nil || secrandHash(data) != want {
+			changed = append(changed, p)
+		}
+	}
+	if len(changed) > 0 {
+		slices.Sort(changed)
+		return nil, fmt.Errorf("%w：生成之后这些文件又被改过（手改，或又生成了别的资源），整文件还原会抹掉那些改动，没有回退任何东西：\n  %s\n先撤掉后来的改动（或后来生成的资源），再回退；也可以按 .gen/%s/before/ 手工还原",
+			ErrEnv, strings.Join(changed, "\n  "), resource)
+	}
+	var done []string
+	for _, p := range m.Created {
+		if err := os.RemoveAll(r.path(p)); err != nil {
+			return done, err
+		}
+		done = append(done, "删除 "+p)
+	}
+	for _, p := range m.Restore {
+		orig, err := os.ReadFile(filepath.Join(dir, "files", p))
+		if err != nil {
+			return done, err
+		}
+		if err := os.WriteFile(r.path(p), orig, 0o644); err != nil {
+			return done, err
+		}
+		done = append(done, "还原 "+p)
+	}
+	return done, os.RemoveAll(filepath.Join(r.Root, ".gen", resource))
 }
 
 // SnapshotDir 是一次生成的快照目录：gen drift 拿它和现在的代码比较。

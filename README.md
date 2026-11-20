@@ -15,7 +15,7 @@ README 只负责"如何跑起来"。
 cmd/api/              HTTP API 入口
 cmd/worker/           后台任务入口（消费队列、定时任务）
 internal/app/         组合根：唯一知道有哪些模块的地方
-internal/modules/     业务模块（auth、staff；每个模块自带 migrations）
+internal/modules/     业务模块（user、staff；每个模块自带 migrations）
 internal/platform/    与业务无关的基础设施（Postgres、Redis、队列、HTTP 服务器等）
 internal/kit/         只依赖标准库的通用件（错误、日志上下文、事务契约、生命周期）
 internal/archtest/    依赖方向的架构测试

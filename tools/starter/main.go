@@ -10,18 +10,14 @@ import (
 
 func main() {
 	if len(os.Args) < 2 {
-		fatal(fmt.Errorf("usage: starter paths|remove|check|own|upgrade"))
+		fatal(fmt.Errorf("usage: starter remove|check|upgrade"))
 	}
 	var err error
 	switch os.Args[1] {
-	case "paths":
-		err = runPaths(os.Args[2:])
 	case "remove":
 		err = runRemove(os.Args[2:])
 	case "check":
 		err = runCheck(os.Args[2:])
-	case "own":
-		err = runOwn(os.Args[2:])
 	case "upgrade":
 		err = runUpgrade(os.Args[2:])
 	default:
@@ -35,31 +31,6 @@ func main() {
 func fatal(err error) {
 	fmt.Fprintln(os.Stderr, err)
 	os.Exit(1)
-}
-
-func runPaths(args []string) error {
-	flags := flag.NewFlagSet("paths", flag.ContinueOnError)
-	root := flags.String("root", ".", "repository root")
-	target := flags.String("target", "", "target git version")
-	removed := flags.String("removed", "", "comma-separated removed modules")
-	if err := flags.Parse(args); err != nil {
-		return err
-	}
-	plan, err := removedModules(*root)
-	if err != nil {
-		return err
-	}
-	if *removed != "" {
-		plan = splitModules(*removed)
-	}
-	paths, err := starterOwnedPaths(*root, *target, plan)
-	if err != nil {
-		return err
-	}
-	for _, path := range paths {
-		fmt.Println(path)
-	}
-	return nil
 }
 
 func runRemove(args []string) error {
@@ -121,29 +92,6 @@ func runCheck(args []string) error {
 		}
 	}
 	return check(*root, modules)
-}
-
-func runOwn(args []string) error {
-	flags := flag.NewFlagSet("own", flag.ContinueOnError)
-	root := flags.String("root", ".", "project root")
-	base := flags.String("base", "", "baseline git version")
-	if err := flags.Parse(args); err != nil {
-		return err
-	}
-	if *base == "" {
-		return fmt.Errorf("own: --base is required")
-	}
-	problems, err := ownershipDrift(*root, *base)
-	if err != nil {
-		return err
-	}
-	for _, problem := range problems {
-		fmt.Println(problem)
-	}
-	if len(problems) > 0 {
-		return fmt.Errorf("own: %d drift item(s)", len(problems))
-	}
-	return nil
 }
 
 func splitModules(value string) []string {

@@ -1,10 +1,9 @@
 package fulfillment
 
 import (
-	"github.com/riverqueue/river"
-
 	"app.local/internal/kit/uow"
 	"app.local/internal/modules/fulfillment/jobs"
+	"app.local/internal/platform/queue"
 )
 
 type Deps struct {
@@ -24,6 +23,6 @@ func New(d Deps) *Module {
 }
 
 // RegisterJobs 注册本模块消费的全部任务。
-func (m *Module) RegisterJobs(workers *river.Workers) {
-	river.AddWorker(workers, jobs.NewOrderCreatedWorker(m.process))
+func (m *Module) RegisterJobs(workers *queue.Workers) {
+	queue.AddWorker(workers, jobs.NewOrderCreatedWorker(m.process))
 }

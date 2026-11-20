@@ -10,8 +10,10 @@ import { ChangePasswordPage } from "./change-password-page";
 
 const mutateAsync = vi.fn();
 vi.mock("./queries", () => ({
-  useMe: () => ({ must_change_password: true }),
   useChangePassword: () => ({ mutateAsync }),
+}));
+vi.mock("@/lib/session", () => ({
+  useMe: () => ({ must_change_password: true }),
   useLogout: () => ({ mutate: vi.fn() }),
 }));
 vi.mock("@tanstack/react-router", () => ({ useNavigate: () => vi.fn() }));

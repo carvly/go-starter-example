@@ -6,9 +6,10 @@ import { changePasswordRequestMeta } from "@/api/meta.gen";
 import { FormError, onFormSubmit, useAppForm } from "@/components/form";
 import { Button } from "@/components/ui/button";
 import { errorMessage } from "@/lib/server-error";
+import { useLogout, useMe } from "@/lib/session";
 
 import { AuthCard } from "./auth-card";
-import { useChangePassword, useLogout, useMe } from "./queries";
+import { useChangePassword } from "./queries";
 import { changePasswordSchema, safeRedirect } from "./schemas";
 
 const { fields } = changePasswordRequestMeta;

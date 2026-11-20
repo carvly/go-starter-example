@@ -1,9 +1,9 @@
 package app
 
 import (
-	"context"
 	"fmt"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -19,7 +19,7 @@ import (
 // 却忘了在 modules.go 登记时，编译能过、功能静默不生效，只能靠这里发现。
 func TestExtensions_EveryExtensionIsRegistered(t *testing.T) {
 	mods := buildModules(newZeroInfra(), testModuleConfigs(t))
-	for _, p := range checkExtensions(mods, commands(mods), periodicJobs(mods), newWorkers(mods)) {
+	for _, p := range checkExtensions(mods, commands(mods), periodicJobs(mods), newWorkers(mods).Kinds()) {
 		t.Error(p)
 	}
 }
@@ -29,7 +29,7 @@ type periodicProvider interface{ PeriodicJobs() []queue.Periodic }
 
 // checkExtensions 遍历 mods（*Modules 或测试里的同构结构体）的每个字段，
 // 字段名转小写就是模块名。
-func checkExtensions(mods any, registeredCmds []cli.Command, registeredJobs []queue.Periodic, workers *river.Workers) []string {
+func checkExtensions(mods any, registeredCmds []cli.Command, registeredJobs []queue.Periodic, workerKinds []string) []string {
 	var problems []string
 
 	cmdNames := map[string]int{}
@@ -56,7 +56,7 @@ func checkExtensions(mods any, registeredCmds []cli.Command, registeredJobs []qu
 
 	v := reflect.ValueOf(mods).Elem()
 	for i := range v.NumField() {
-		// 字段名是模块目录名首字母大写（scripts/check-module-removal.sh 的 title() 按此推导），
+		// 字段名是模块目录名首字母大写（tools/starter 的删除执行器按此推导），
 		// 这里做它的逆变换。
 		fieldName := v.Type().Field(i).Name
 		module := strings.ToLower(fieldName[:1]) + fieldName[1:]
@@ -93,9 +93,8 @@ func checkExtensions(mods any, registeredCmds []cli.Command, registeredJobs []qu
 		}
 	}
 	for kind := range registeredKinds {
-		probeKind = kind
-		if err := river.AddWorkerSafely(workers, probeWorker{}); err == nil {
-			problems = append(problems, fmt.Sprintf("定时任务 %q 没有对应的 worker：在提供它的模块的 RegisterJobs 里 river.AddWorker，并确认该模块在 modules.go 的 jobRegistrars 里", kind))
+		if !slices.Contains(workerKinds, kind) {
+			problems = append(problems, fmt.Sprintf("定时任务 %q 没有对应的 worker：在提供它的模块的 RegisterJobs 里 queue.AddWorker，并确认该模块在 modules.go 的 jobRegistrars 里", kind))
 		}
 	}
 	return problems
@@ -117,39 +116,29 @@ type fakeCleanupArgs struct{}
 
 func (fakeCleanupArgs) Kind() string { return "fake_staff_cleanup" }
 
-type fakeCleanupWorker struct {
-	river.WorkerDefaults[fakeCleanupArgs]
-}
-
-func (fakeCleanupWorker) Work(context.Context, *river.Job[fakeCleanupArgs]) error { return nil }
-
 // 检查本身要能失败：每种漏写都必须被报出来，否则上面的通过不说明任何问题。
 func TestCheckExtensions_ReportsEachMistake(t *testing.T) {
 	cmd := func(name string) cli.Command { return cli.Command{Name: name} }
 	job := queue.Periodic{Schedule: river.PeriodicInterval(time.Hour), Args: fakeCleanupArgs{}}
 	daily := queue.Periodic{Schedule: river.PeriodicInterval(24 * time.Hour), Args: fakeCleanupArgs{}}
-	withWorker := func() *river.Workers {
-		w := river.NewWorkers()
-		river.AddWorker(w, fakeCleanupWorker{})
-		return w
-	}
+	withWorker := func() []string { return []string{fakeCleanupArgs{}.Kind()} }
 
 	tests := []struct {
 		name       string
 		module     fakeExtModule
 		registered []cli.Command
 		regJobs    []queue.Periodic
-		workers    *river.Workers
+		workers    []string
 		want       string
 	}{
-		{"命令没登记", fakeExtModule{cmds: []cli.Command{cmd("staff create")}}, nil, nil, river.NewWorkers(), "没有登记"},
-		{"命令前缀不是模块名", fakeExtModule{cmds: []cli.Command{cmd("auth create")}}, []cli.Command{cmd("auth create")}, nil, river.NewWorkers(), "必须以模块名"},
-		{"命令只有一个词", fakeExtModule{cmds: []cli.Command{cmd("staff")}}, []cli.Command{cmd("staff")}, nil, river.NewWorkers(), "格式不对"},
-		{"命令名重复", fakeExtModule{}, []cli.Command{cmd("staff create"), cmd("staff create")}, nil, river.NewWorkers(), "登记了 2 次"},
+		{"命令没登记", fakeExtModule{cmds: []cli.Command{cmd("staff create")}}, nil, nil, nil, "没有登记"},
+		{"命令前缀不是模块名", fakeExtModule{cmds: []cli.Command{cmd("user create")}}, []cli.Command{cmd("user create")}, nil, nil, "必须以模块名"},
+		{"命令只有一个词", fakeExtModule{cmds: []cli.Command{cmd("staff")}}, []cli.Command{cmd("staff")}, nil, nil, "格式不对"},
+		{"命令名重复", fakeExtModule{}, []cli.Command{cmd("staff create"), cmd("staff create")}, nil, nil, "登记了 2 次"},
 		{"定时任务没登记", fakeExtModule{jobs: []queue.Periodic{job}}, nil, nil, withWorker(), "periodicJobRegistrars"},
 		{"同一 kind 的两个调度只登记了一个", fakeExtModule{jobs: []queue.Periodic{job, daily}}, nil, []queue.Periodic{job}, withWorker(), "提供了 2 个、登记了 1 个"},
 		{"定时任务登记了两次", fakeExtModule{jobs: []queue.Periodic{job}}, nil, []queue.Periodic{job, job}, withWorker(), "提供了 1 个、登记了 2 个"},
-		{"定时任务没有 worker", fakeExtModule{jobs: []queue.Periodic{job}}, nil, []queue.Periodic{job}, river.NewWorkers(), "没有对应的 worker"},
+		{"定时任务没有 worker", fakeExtModule{jobs: []queue.Periodic{job}}, nil, []queue.Periodic{job}, nil, "没有对应的 worker"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

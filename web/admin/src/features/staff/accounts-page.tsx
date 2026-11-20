@@ -7,13 +7,12 @@ import { type DataTableColumn, DataTable, Pager, useCursorPager } from "@/compon
 import { TitleWithTip } from "@/components/info-tip";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
-import { type Role, rolesQuery } from "@/features/roles/queries";
+import { type Role, RoleFlowGuide, rolesQuery } from "@/features/roles";
 import { formatDateTime } from "@/lib/format";
 
 import { AccountBadges } from "./badges";
 import { CreateAccountDialog } from "./create-account-dialog";
 import { type Account, accountsQuery, needsRole } from "./queries";
-import { RoleFlowGuide } from "./role-guide";
 
 const { fields } = accountMeta;
 

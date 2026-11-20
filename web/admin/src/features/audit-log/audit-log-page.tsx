@@ -6,7 +6,7 @@ import { auditLogMeta, type listAuditLogsMeta } from "@/api/meta.gen";
 import { type DataTableColumn, DataTable, Pager, useCursorPager } from "@/components/data-table";
 import { DateTimeCell, TextCell } from "@/components/data-table/cells";
 import { DateRangeFilter, FilterBar, SelectFilter } from "@/components/filters";
-import { accountsQuery } from "@/features/staff/queries";
+import { accountsQuery } from "@/features/staff";
 import { dayRange } from "@/lib/format";
 
 import { describeAction } from "./describe";

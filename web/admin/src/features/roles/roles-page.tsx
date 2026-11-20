@@ -6,7 +6,7 @@ import { ConfirmButton } from "@/components/confirm-button";
 import { type DataTableColumn, DataTable } from "@/components/data-table";
 import { TitleWithTip } from "@/components/info-tip";
 import { Badge } from "@/components/ui/badge";
-import { RoleFlowGuide } from "@/features/staff/role-guide";
+import { RoleFlowGuide } from "./role-guide";
 import { formatDateTime } from "@/lib/format";
 
 import { PermissionsDialog } from "./permissions-dialog";

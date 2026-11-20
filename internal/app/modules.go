@@ -2,21 +2,23 @@ package app
 
 import (
 	"github.com/labstack/echo/v5"
-	"github.com/riverqueue/river"
 
-	"app.local/internal/modules/auth"
 	"app.local/internal/modules/fulfillment"
 	"app.local/internal/modules/order"
 	"app.local/internal/modules/product"
 	"app.local/internal/modules/staff"
+	"app.local/internal/modules/user"
 	"app.local/internal/platform/cli"
 	"app.local/internal/platform/queue"
 )
 
-// 新增或删除一个模块只改这个文件。约定：每个模块只占 import 一行、Modules 字段
-// 一行、buildModules 里构造一行（变量名固定为 <模块>M，构造参数里引用了谁就依赖谁）、
-// 返回值一行、注册切片里各一行。scripts/check-module-removal.sh 按这个约定逐行删除
-// 来演练"删掉一个模块"，internal/app 的测试检查每个模块目录都在这里注册过。
+// 新增或删除一个模块改组合根的 modules.go（本文件）、migrate.go、module_configs.go 三个文件（跨模块调用
+// 另加 adapters_*.go）。约定：每个模块只占 import 一行、Modules 字段一行、buildModules 里构造一行（变量名
+// 固定为 <模块>M，构造参数里引用了谁就依赖谁）、返回值一行、注册切片里各一行。tools/starter 的删除执行器
+// （modules_go.go）按这个约定逐行删除，internal/app 的测试检查每个模块目录都在这里注册过。
+//
+// 构造行推导不出的依赖写在可选的 moduleRequires 里，例如 order 的事件只有 fulfillment 消费，删掉
+// fulfillment 时 order 也要删：var moduleRequires = map[string][]string{"order": {"fulfillment"}}
 
 var moduleRequires = map[string][]string{
 	"order": {"fulfillment"},
@@ -27,7 +29,7 @@ type Modules struct {
 	Order       *order.Module
 	Fulfillment *fulfillment.Module
 	Staff       *staff.Module
-	Auth        *auth.Module
+	User        *user.Module
 }
 
 func buildModules(in *Infra, configs moduleConfigs) *Modules {
@@ -35,13 +37,13 @@ func buildModules(in *Infra, configs moduleConfigs) *Modules {
 	orderM := order.New(order.Deps{DB: in.DBTx, Queue: in.Queue, Products: productLookup{productM.Service}})
 	fulfillmentM := fulfillment.New(fulfillment.Deps{UoW: in.DBTx, Ledger: orderM.EventLedger(), Stock: stockReserver{productM.Service}, Orders: orderM.Service})
 	staffM := staff.New(staff.Deps{DB: in.DBTx, Config: configs.Staff, Argon2: in.Config.Argon2, Operations: adminOperations(), Logger: in.Logger})
-	authM := auth.New(auth.Deps{DB: in.DBTx, Config: configs.Auth, Queue: in.Queue, Redis: in.Redis, Logger: in.Logger})
+	userM := user.New(user.Deps{DB: in.DBTx, Config: configs.User, Queue: in.Queue, Redis: in.Redis, Logger: in.Logger})
 	return &Modules{
 		Product:     productM,
 		Order:       orderM,
 		Fulfillment: fulfillmentM,
 		Staff:       staffM,
-		Auth:        authM,
+		User:        userM,
 	}
 }
 
@@ -49,7 +51,7 @@ func (m *Modules) httpRegistrars() []func(*echo.Group) {
 	return []func(*echo.Group){
 		m.Product.RegisterHTTP,
 		m.Order.RegisterHTTP,
-		m.Auth.RegisterHTTP,
+		m.User.RegisterHTTP,
 	}
 }
 
@@ -59,7 +61,7 @@ func (m *Modules) adminRegistrars() []func(*echo.Group) {
 		m.Product.RegisterAdminHTTP,
 		m.Order.RegisterAdminHTTP,
 		m.Staff.RegisterAdminHTTP,
-		m.Auth.RegisterAdminHTTP,
+		m.User.RegisterAdminHTTP,
 	}
 }
 
@@ -71,28 +73,12 @@ func (m *Modules) adminAuth() []echo.MiddlewareFunc {
 	}
 }
 
-func (m *Modules) jobRegistrars() []func(*river.Workers) {
-	return []func(*river.Workers){
+func (m *Modules) jobRegistrars() []func(*queue.Workers) {
+	return []func(*queue.Workers){
 		m.Fulfillment.RegisterJobs,
 		m.Staff.RegisterJobs,
-		m.Auth.RegisterJobs,
+		m.User.RegisterJobs,
 	}
-}
-
-func jobKindRegistrars() []func() []string {
-	return []func() []string{
-		fulfillment.JobKinds,
-		staff.JobKinds,
-		auth.JobKinds,
-	}
-}
-
-func workerKinds() []string {
-	var out []string
-	for _, register := range jobKindRegistrars() {
-		out = append(out, register()...)
-	}
-	return out
 }
 
 func (m *Modules) commandRegistrars() []func() []cli.Command {
@@ -104,10 +90,10 @@ func (m *Modules) commandRegistrars() []func() []cli.Command {
 func (m *Modules) periodicJobRegistrars() []func() []queue.Periodic {
 	return []func() []queue.Periodic{
 		m.Staff.PeriodicJobs,
-		m.Auth.PeriodicJobs,
+		m.User.PeriodicJobs,
 	}
 }
 
 // 持有用户数据的模块在全部模块构造完成后登记清理器，每个登记独占一行：
-// authM.AddUserDataCleaner(memberM.UserDataCleaner())。
-// 登记行不产生构造依赖；模块经公开资料查询做每日清扫时才真实依赖 auth。
+// userM.AddDataCleaner(memberM.UserDataCleaner())。
+// 登记行不产生构造依赖；模块经公开资料查询做每日清扫时才真实依赖 user。

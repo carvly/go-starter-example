@@ -11,9 +11,9 @@ import (
 	"github.com/labstack/echo/v5"
 
 	"app.local/internal/kit/uow/uowtest"
-	"app.local/internal/modules/auth/domain"
-	"app.local/internal/modules/auth/domain/domaintest"
-	"app.local/internal/modules/auth/httpapi"
+	"app.local/internal/modules/user/domain"
+	"app.local/internal/modules/user/domain/domaintest"
+	"app.local/internal/modules/user/httpapi"
 	"app.local/internal/platform/httpserver"
 	"app.local/internal/platform/oauth"
 )

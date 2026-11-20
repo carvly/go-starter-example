@@ -4,38 +4,39 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"maps"
 	"slices"
 
 	"app.local/internal/config"
-	"app.local/internal/platform/postgres"
+	"app.local/internal/platform/logger"
 	"app.local/internal/platform/queue"
 )
 
-// RunQueueCommand 只使用数据库配置和纯 worker kind 声明，不构造业务模块。
-func RunQueueCommand(ctx context.Context, args []string, stdout io.Writer) error {
+// RunQueueCommand 执行 api queue cancel-orphans：取消当前二进制没有 worker 的非终态任务。
+// 它和 worker 进程一样构造模块并注册 worker，kind 清单只来自实际注册（newWorkers），不另写声明；
+// 部署环境本来就有完整配置。日志写 stderr，stdout 只输出结果。
+func RunQueueCommand(ctx context.Context, cfg *config.Config, args []string, stdout, stderr io.Writer) error {
 	if len(args) != 2 || args[1] != "cancel-orphans" {
 		return fmt.Errorf("usage: api queue cancel-orphans")
 	}
-	cfg, err := config.LoadDB()
+	configs, err := loadModuleConfigs(cfg.Source)
 	if err != nil {
 		return err
 	}
-	pool, err := postgres.NewPool(ctx, postgres.PoolConfig{
-		DSN: cfg.DSN, MinConns: cfg.MinConns, MaxConns: cfg.MaxConns,
-		MaxConnLifetime: cfg.MaxConnLifetime, HealthCheckPeriod: cfg.HealthCheckPeriod,
-	})
+	log := logger.New(cfg.LogLevel, stderr)
+	slog.SetDefault(log)
+	in, err := NewInfra(ctx, cfg, log)
 	if err != nil {
 		return err
 	}
-	defer pool.Close()
-	cancelled, err := queue.CancelOrphans(ctx, pool, workerKinds())
+	defer in.Close()
+	cancelled, err := queue.CancelOrphans(ctx, in.Pool, newWorkers(buildModules(in, configs)).Kinds())
 	if err != nil {
 		return err
 	}
 	for _, kind := range slices.Sorted(maps.Keys(cancelled)) {
-		count := cancelled[kind]
-		_, _ = fmt.Fprintf(stdout, "%s\t%d\n", kind, count)
+		_, _ = fmt.Fprintf(stdout, "%s\t%d\n", kind, cancelled[kind])
 	}
 	return nil
 }

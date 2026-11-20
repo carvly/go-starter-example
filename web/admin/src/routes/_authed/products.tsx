@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { Package } from "lucide-react";
 
 import { listProductsMeta } from "@/api/meta.gen";
-import { page } from "@/features/auth/guard";
+import { page } from "@/lib/guard";
 import { ProductsPage } from "@/features/products/products-page";
 
 export const Route = createFileRoute("/_authed/products")({

@@ -220,3 +220,34 @@ func TestLoad_DBMaxConnLifetimeEnv(t *testing.T) {
 		t.Fatalf("MaxConnLifetime = %v, err = %v", cfg.DB.MaxConnLifetime, err)
 	}
 }
+
+// LoadDB 与 Load 共用数据库配置的解析：连接池参数的环境变量覆盖对 migrate 命令同样生效。
+func TestLoadDB_HonorsPoolEnv(t *testing.T) {
+	t.Setenv("DB_DSN", "postgres://user:pass@localhost:5432/app")
+	t.Setenv("DB_MAX_CONNS", "7")
+	t.Setenv("DB_MAX_CONN_LIFETIME", "5m")
+	cfg, err := config.LoadDB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.MaxConns != 7 || cfg.MaxConnLifetime != 5*time.Minute {
+		t.Fatalf("LoadDB = %+v, want MaxConns=7 MaxConnLifetime=5m", cfg)
+	}
+}
+
+func TestLoad_RateLimitAndTimeoutMustBePositive(t *testing.T) {
+	for _, env := range []string{"HTTP_GLOBAL_RATE_LIMIT_PER_SECOND", "HTTP_REQUEST_TIMEOUT"} {
+		t.Run(env, func(t *testing.T) {
+			t.Setenv("DB_DSN", "postgres://user:pass@localhost:5432/app")
+			t.Setenv("CORS_ALLOW_ORIGINS", "https://example.com")
+			value := "0"
+			if env == "HTTP_REQUEST_TIMEOUT" {
+				value = "0s"
+			}
+			t.Setenv(env, value)
+			if _, err := config.Load(); err == nil || !strings.Contains(err.Error(), env) {
+				t.Fatalf("err = %v, want 提到 %s", err, env)
+			}
+		})
+	}
+}

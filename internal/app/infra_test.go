@@ -36,7 +36,7 @@ func testModuleConfigs(t *testing.T) moduleConfigs {
 	t.Helper()
 	t.Setenv("JWT_SIGNING_KEY", "test-signing-key")
 	t.Setenv("JWT_KEY_ID", "test-kid")
-	t.Setenv("AUTH_PUBLIC_BASE_URL", "https://api.example.com")
+	t.Setenv("USER_PUBLIC_BASE_URL", "https://api.example.com")
 	configs, err := loadModuleConfigs(config.NewSource())
 	if err != nil {
 		t.Fatal(err)

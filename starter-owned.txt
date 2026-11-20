@@ -21,7 +21,7 @@ internal/app/infra_test.go
 internal/app/command_test.go
 internal/app/admin_staff_integration_test.go
 internal/app/user_data_cleaner_test.go
-internal/modules/auth/
+internal/modules/user/
 internal/modules/staff/
 web/admin/src/api/
 web/admin/src/components/
@@ -29,22 +29,6 @@ web/admin/src/hooks/
 web/admin/src/lib/
 web/admin/src/styles/
 web/admin/src/main.tsx
-web/admin/src/features/auth/
-web/admin/src/features/staff/
-web/admin/src/features/roles/
-web/admin/src/features/audit-log/
-web/admin/src/features/settings/
-web/admin/src/features/home/
-web/admin/src/features/users/
-web/admin/src/routes/login.tsx
-web/admin/src/routes/change-password.tsx
-web/admin/src/routes/_authed/index.tsx
-web/admin/src/routes/_authed/accounts/
-web/admin/src/routes/_authed/roles.tsx
-web/admin/src/routes/_authed/audit-logs.tsx
-web/admin/src/routes/_authed/settings.tsx
-web/admin/src/routes/_authed/users/
-web/admin/e2e/admin.spec.ts
 web/admin/e2e/fixtures/
 web/admin/scripts/
 web/admin/pnpm-workspace.yaml
@@ -65,4 +49,4 @@ lefthook.yml
 .redocly.lint-ignore.yaml
 .dockerignore
 starter-owned.txt
-CHANGELOG.md
+starter-changelog.md

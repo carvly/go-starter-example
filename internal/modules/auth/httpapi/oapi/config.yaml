@@ -1,8 +1,0 @@
-# 只生成 api/openapi.yaml 中 tag=auth 的操作及其引用的 schema。
-package: oapi
-generate:
-  echo5-server: true
-  models: true
-output-options:
-  include-tags: [auth]
-output: api.gen.go

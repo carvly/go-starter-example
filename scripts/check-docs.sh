@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# 文档里用反引号引用的仓库路径必须真实存在：过期的文档会把 agent 引向不存在的
-# 文件，比没有文档更糟。docs/proposals/ 描述规划中的改动，不检查。
+# 文档里用反引号引用的仓库路径和 Markdown 链接的目标必须真实存在：过期的文档会把 agent 引向不存在的
+# 文件，比没有文档更糟。docs/proposals/（规划）和 docs/archive/（历史）只在本地保留、不入库，已提交的文档
+# 不能引用其中的具体文件（只提目录名可以），否则 clone 下来的人看到的是失效链接。
 #
 # 只检查以 internal/ cmd/ scripts/ api/ migrations/ deploy/ configs/ docs/ 开头的
 # 路径；含 <...>、*、{...} 的是模式而不是具体路径，跳过。模块 migrations/*.sql 里的引用
@@ -11,7 +12,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
-files=(AGENTS.md README.md docs/ARCHITECTURE.md)
+files=(AGENTS.md AGENTS.project.md README.md docs/ARCHITECTURE.md docs/PROJECT.md)
 while IFS= read -r f; do files+=("$f"); done < <(find docs/agents internal/modules -path '*/docs/*.md' -o -path 'docs/agents/*.md' 2>/dev/null | sort)
 
 missing=0
@@ -26,7 +27,12 @@ check_refs() {
 		path="${path%/}"
 		path="${path%%#*}"
 		case "$path" in
-		*'<'* | *'*'* | *'{'* | *'...'* | *' '* | docs/proposals | docs/proposals/*) continue ;;
+		*'<'* | *'*'* | *'{'* | *'...'* | *' '* | docs/proposals | docs/archive) continue ;;
+		docs/proposals/* | docs/archive/*)
+			echo "$f:$line: 引用了只在本地保留的文档：${path}（不入库，别人打不开；把要点写进正文）" >&2
+			missing=1
+			continue
+			;;
 		esac
 		skip=0
 		for module in $removed_modules; do
@@ -44,6 +50,47 @@ for f in "${files[@]}"; do
 	[ -f "$f" ] || continue
 	# shellcheck disable=SC2016 # 单引号里的反引号是要匹配的字符，不是命令替换
 	check_refs "$f" < <(grep -noE '`(internal|cmd|scripts|api|migrations|deploy|configs|docs)/[^`]*`' "$f" | sed -E 's/^([0-9]+):`([^`]*)`$/\1:\2/')
+done
+
+# Markdown 链接 [文字](相对路径)：目标相对文档所在目录解析，必须存在；外部链接、页内锚点、行内代码和代码块
+# 里的内容跳过。
+check_links() {
+	local f="$1" dir line target path
+	dir="$(dirname "$f")"
+	while IFS=: read -r line target; do
+		case "$target" in
+		http://* | https://* | mailto:* | '#'*) continue ;;
+		esac
+		path="${target%%#*}"
+		path="${path%% *}"
+		[ -n "$path" ] || continue
+		case "$dir/$path" in
+		*docs/proposals/?* | *docs/archive/?*)
+			echo "$f:$line: 链接到只在本地保留的文档：${target}（不入库，别人打不开；把要点写进正文）" >&2
+			missing=1
+			continue
+			;;
+		esac
+		if [ ! -e "$dir/$path" ]; then
+			echo "$f:$line: 链接的目标不存在：$target" >&2
+			missing=1
+		fi
+	done < <(awk '
+		/^[[:space:]]*```/ { fence = !fence; next }
+		fence { next }
+		{
+			s = $0
+			gsub(/`[^`]*`/, "", s)
+			while (match(s, /\]\([^)]+\)/)) {
+				print FNR ":" substr(s, RSTART + 2, RLENGTH - 3)
+				s = substr(s, RSTART + RLENGTH)
+			}
+		}' "$f")
+}
+
+for f in "${files[@]}"; do
+	[ -f "$f" ] || continue
+	check_links "$f"
 done
 
 # river 导出的 0006 不手改，里面的 URL 也不是仓库路径。左边界排除 URL 和单词中间的子串

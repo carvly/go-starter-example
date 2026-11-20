@@ -407,7 +407,7 @@ func problem(rule, file string, line, col int, path, msg, fix string) Problem {
 }
 
 func docRef(rule string) string {
-	return "docs/agents/generator.md#" + strings.ToLower(rule)
+	return "docs/agents/generator-rules.md#" + strings.ToLower(rule)
 }
 
 // reFoldedCJK 是折叠块（>-）把换行换成的空格，两边都是中文字符或全角标点。

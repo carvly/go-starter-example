@@ -2,22 +2,30 @@ package main
 
 import (
 	"fmt"
+	"maps"
 	"slices"
+
+	"app.local/tools/internal/specmap"
 )
 
+// ownershipDrift 列出项目相对基线改过的 starter 操作和它们引用的 schema。
 func ownershipDrift(root, base string) ([]string, error) {
-	tags := starterTags(root)
+	current := repository{root: root}
+	tags, err := starterTags(current)
+	if err != nil {
+		return nil, err
+	}
 	var problems []string
 	for _, name := range []string{"api/openapi.yaml", "api/admin.yaml"} {
-		before, err := read(root, base, name)
+		before, err := parseAt(repository{root: root, target: base}, name)
 		if err != nil {
 			return nil, err
 		}
-		after, err := read(root, "", name)
+		after, err := parseAt(current, name)
 		if err != nil {
 			return nil, err
 		}
-		beforeOps, afterOps := starterOperations(before, tags), starterOperations(after, tags)
+		beforeOps, afterOps := taggedOperations(before, tags), taggedOperations(after, tags)
 		keys := map[string]bool{}
 		for key := range beforeOps {
 			keys[key] = true
@@ -25,44 +33,37 @@ func ownershipDrift(root, base string) ([]string, error) {
 		for key := range afterOps {
 			keys[key] = true
 		}
-		var sortedKeys []string
-		for key := range keys {
-			sortedKeys = append(sortedKeys, key)
-		}
-		slices.Sort(sortedKeys)
-		for _, key := range sortedKeys {
+		for _, key := range slices.Sorted(maps.Keys(keys)) {
 			if beforeOps[key] != afterOps[key] {
 				problems = append(problems, fmt.Sprintf("%s: starter operation changed: %s", name, key))
 			}
 		}
-		beforeSchemas, afterSchemas := schemas(before), schemas(after)
-		refs := map[string]bool{}
-		for _, block := range beforeOps {
+		beforeSchemas, afterSchemas := schemaTexts(before), schemaTexts(after)
+		var roots []string
+		for _, block := range slices.Concat(slices.Collect(maps.Values(beforeOps)), slices.Collect(maps.Values(afterOps))) {
 			for _, match := range referenced(block) {
-				refs[match[1]] = true
+				roots = append(roots, match[1])
 			}
 		}
-		for _, block := range afterOps {
-			for _, match := range referenced(block) {
-				refs[match[1]] = true
-			}
-		}
-		allRefs := map[string]bool{}
-		for schemaName := range refs {
-			for ref := range schemaClosure([]string{schemaName}, beforeSchemas) {
-				allRefs[ref] = true
-			}
-			for ref := range schemaClosure([]string{schemaName}, afterSchemas) {
-				allRefs[ref] = true
-			}
-		}
-		sortedRefs := mapsKeys(allRefs)
-		slices.Sort(sortedRefs)
-		for _, schemaName := range sortedRefs {
+		all := schemaClosure(roots, beforeSchemas)
+		maps.Copy(all, schemaClosure(roots, afterSchemas))
+		for _, schemaName := range slices.Sorted(maps.Keys(all)) {
 			if beforeSchemas[schemaName] != afterSchemas[schemaName] {
 				problems = append(problems, fmt.Sprintf("%s: starter schema changed: %s", name, schemaName))
 			}
 		}
 	}
 	return problems, nil
+}
+
+func parseAt(repo repository, name string) (*specmap.Doc, error) {
+	content, err := repo.Read(name)
+	if err != nil {
+		return nil, err
+	}
+	doc, err := specmap.Parse([]byte(content))
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", name, err)
+	}
+	return doc, nil
 }

@@ -1,6 +1,6 @@
 import { ConfirmButton } from "@/components/confirm-button";
 import { toast } from "@/components/ui/toast";
-import { useCan } from "@/features/auth/queries";
+import { useCan } from "@/lib/session";
 
 import { type User, useDisableUser, useEnableUser } from "./queries";
 

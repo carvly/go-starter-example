@@ -93,13 +93,13 @@ func TestInsertMigrationSource(t *testing.T) {
 	src := `package app
 
 import (
-	"app.local/internal/modules/auth"
+	"app.local/internal/modules/user"
 	"app.local/internal/platform/migrate"
 )
 
 func migrationSources() []migrate.Source {
 	return []migrate.Source{
-		auth.Migrations,
+		user.Migrations,
 	}
 }
 `
@@ -185,8 +185,8 @@ func TestBuildModel_NoWriteOperationsHasNoChecks(t *testing.T) {
 }
 
 func TestFixtureNames(t *testing.T) {
-	in := "# 注释 module: x\nmodule: auth\nresource: user\nplural: people\ntitle: 用户\nfields:\n  module: { type: string }\n"
-	want := "# 注释 module: x\nmodule: fxauth\nresource: fx_user\nplural: fx_people\ntitle: 用户\nfields:\n  module: { type: string }\n"
+	in := "# 注释 module: x\nmodule: member\nresource: user\nplural: people\ntitle: 用户\nfields:\n  module: { type: string }\n"
+	want := "# 注释 module: x\nmodule: fxmember\nresource: fx_user\nplural: fx_people\ntitle: 用户\nfields:\n  module: { type: string }\n"
 	if got := string(FixtureNames([]byte(in))); got != want {
 		t.Errorf("FixtureNames =\n%s\nwant\n%s", got, want)
 	}

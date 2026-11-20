@@ -113,10 +113,10 @@
   `total_capped` 为 true；只能翻到前 10000 条，更后面返回 400 `page_out_of_range`（大表上
   `count(*)` 和大 OFFSET 都要扫过前面的全部行）。数据量大、只需要往后翻的列表（如操作日志）
   仍可以用 cursor 分页；枚举多选的筛选参数是数组，写 `style: form`、`explode: false`（逗号分隔，
-  如订单列表的 `status`），后台前端按同样的格式序列化；
-- 编辑整份表单的接口带乐观锁（如 `updateProduct`）：资源返回 `version`，修改请求必须带上读到的
+  如按状态筛选的 `status`），后台前端按同样的格式序列化；
+- 编辑整份表单的接口带乐观锁（生成器的 `update<资源>`）：资源返回 `version`，修改请求必须带上读到的
   `version`，已经不是最新时返回 409 `<资源>_conflict`，并提供直接读库、不经过缓存的详情接口
-  （如 `getProduct`），冲突后前端用它取最新内容；表结构见 [database.md](database.md) 的"写
+  （`get<资源>`），冲突后前端用它取最新内容；表结构见 [database.md](database.md) 的"写
   Repository"；
 - 员工身份用 `httpserver.StaffSessionFrom(c)` 读，和前台的 `UserSession` 是两套键和类型；
   会话、权限检查、操作日志的实现见 [auth.md](auth.md) 的“后台员工”；
@@ -130,7 +130,7 @@
 
 全局链固定为：Recover → RequestID → BodyLimit → CORS → Secure → 全局限流 →
 Prometheus 指标 → Timeout（`internal/platform/httpserver/server.go` 的 `newServer`，前台和
-后台共用，后台没有 CORS）。鉴权是操作级中间件，由模块挂载；auth 还给自己的操作挂了按 IP
+后台共用，后台没有 CORS）。鉴权是操作级中间件，由模块挂载；user 还给自己的操作挂了按 IP
 的限流和只接受 JSON 请求体的中间件，见 [auth.md](auth.md)。
 
 - Recover 必须在最外层：Echo v5 自己不恢复 panic，没有 Recover 时靠 net/http 在连接级
@@ -175,4 +175,4 @@ Prometheus 指标 → Timeout（`internal/platform/httpserver/server.go` 的 `ne
   文档页、前端托管）：`internal/platform/httpserver/admin_test.go`；
 - 通用请求校验、业务错误渲染、请求体过大：`internal/app/http_test.go`，用真实中间件链，
   只把 Repository 换成 `domaintest` 的 fake；
-- 中间件自己的单测放在定义它的模块里（`internal/modules/auth/httpapi/middleware_test.go`）。
+- 中间件自己的单测放在定义它的模块里（`internal/modules/user/httpapi/middleware_test.go`）。

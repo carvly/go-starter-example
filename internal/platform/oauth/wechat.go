@@ -3,6 +3,7 @@ package oauth
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -41,6 +42,11 @@ func (c *wechatClient) get(ctx context.Context, path string, q url.Values, out a
 	}
 	resp, err := c.http.Do(req)
 	if err != nil {
+		// *url.Error 的文字带完整 URL（含 appid 和 secret），错误会进日志：只保留路径和内层原因。
+		var ue *url.Error
+		if errors.As(err, &ue) {
+			err = ue.Err
+		}
 		return fmt.Errorf("wechat: %s: %w", path, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
@@ -196,14 +202,22 @@ func WeChatMP(app WeChatApp, apiBase string) Provider {
 	}
 }
 
-func (w *wechatBrowser) SupportsPKCE() bool { return false }
+// Capabilities：微信不支持 PKCE 和 nonce。
+func (w *wechatBrowser) Capabilities() BrowserCapabilities { return BrowserCapabilities{} }
 
 func (w *wechatBrowser) AuthorizeURL(p AuthorizeParams) string {
 	return w.authorize(w.app, p)
 }
 
-func (w *wechatBrowser) Exchange(ctx context.Context, code, _, _ string) (Identity, error) {
-	t, err := w.client.oauthAccessToken(ctx, w.app, code)
+func (w *wechatBrowser) Exchange(ctx context.Context, p ExchangeParams) (Identity, error) {
+	// 服务号网页快照页的回调带 is_snapshotuser=1，不用换 token 就能拒绝。
+	if p.Callback.Get("is_snapshotuser") == "1" {
+		return Identity{}, ErrSnapshotUser
+	}
+	if p.Code == "" {
+		return Identity{}, ErrMissingCredential
+	}
+	t, err := w.client.oauthAccessToken(ctx, w.app, p.Code)
 	if err != nil {
 		return Identity{}, err
 	}
@@ -231,7 +245,7 @@ func (w *wechatBrowser) Exchange(ctx context.Context, code, _, _ string) (Identi
 		return Identity{}, err
 	}
 	return Identity{
-		Provider:  LoginProviderWeChat,
+		Provider:  ProviderWeChat,
 		Subject:   unionid,
 		Name:      u.Nickname,
 		AvatarURL: u.HeadImgURL,
@@ -240,7 +254,7 @@ func (w *wechatBrowser) Exchange(ctx context.Context, code, _, _ string) (Identi
 }
 
 // wechatMiniprogram 是小程序的 wx.login 路径：code2session 直接换 openid + unionid。
-// session_key 不下发也不保存：P1a 不需要解密开放数据（手机号走 code 换号，P1b）。
+// session_key 不下发也不保存：不解密开放数据（手机号用 code 换号）。
 type wechatMiniprogram struct {
 	app    WeChatApp
 	client *wechatClient
@@ -251,7 +265,12 @@ func WeChatMiniprogram(app WeChatApp, apiBase string) Native {
 	return &wechatMiniprogram{app: app, client: newWeChatClient(apiBase)}
 }
 
+func (w *wechatMiniprogram) Capabilities() NativeCapabilities { return NativeCapabilities{} }
+
 func (w *wechatMiniprogram) VerifyNative(ctx context.Context, cred NativeCredential) (Identity, error) {
+	if cred.Code == "" {
+		return Identity{}, ErrMissingCredential
+	}
 	s, err := w.client.code2Session(ctx, w.app, cred.Code)
 	if err != nil {
 		return Identity{}, err
@@ -263,7 +282,7 @@ func (w *wechatMiniprogram) VerifyNative(ctx context.Context, cred NativeCredent
 		return Identity{}, err
 	}
 	return Identity{
-		Provider: LoginProviderWeChat,
+		Provider: ProviderWeChat,
 		Subject:  s.UnionID,
 		WeChat:   &WeChatIDs{AppID: w.app.AppID, OpenID: s.OpenID},
 	}, nil
@@ -276,12 +295,17 @@ type wechatAppNative struct {
 	client *wechatClient
 }
 
-// WeChatAppNative 是 Android/iOS App 的微信登录（P1a 只有 Android）。
+// WeChatAppNative 是 Android/iOS App 的微信登录。
 func WeChatAppNative(app WeChatApp, apiBase string) Native {
 	return &wechatAppNative{app: app, client: newWeChatClient(apiBase)}
 }
 
+func (w *wechatAppNative) Capabilities() NativeCapabilities { return NativeCapabilities{} }
+
 func (w *wechatAppNative) VerifyNative(ctx context.Context, cred NativeCredential) (Identity, error) {
+	if cred.Code == "" {
+		return Identity{}, ErrMissingCredential
+	}
 	t, err := w.client.oauthAccessToken(ctx, w.app, cred.Code)
 	if err != nil {
 		return Identity{}, err
@@ -310,7 +334,7 @@ func (w *wechatAppNative) VerifyNative(ctx context.Context, cred NativeCredentia
 		return Identity{}, err
 	}
 	return Identity{
-		Provider:  LoginProviderWeChat,
+		Provider:  ProviderWeChat,
 		Subject:   unionid,
 		Name:      u.Nickname,
 		AvatarURL: u.HeadImgURL,

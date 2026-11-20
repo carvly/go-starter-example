@@ -14,7 +14,7 @@ import { FormDialog, useDialog } from "@/components/overlay";
 import { Button } from "@/components/ui/button";
 {{- end}}
 import { toast } from "@/components/ui/toast";
-import { useCan } from "@/features/auth/queries";
+import { useCan } from "@/lib/session";
 {{- if UsesEnumOptions .ActionInputs}}
 import { enumOptions } from "@/lib/enum-options";
 {{- end}}

@@ -1,0 +1,8 @@
+# 只生成 api/openapi.yaml 中 tag=user 的操作及其引用的 schema。
+package: oapi
+generate:
+  echo5-server: true
+  models: true
+output-options:
+  include-tags: [user]
+output: api.gen.go

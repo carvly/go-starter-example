@@ -6,7 +6,7 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "@/components/ui/toast";
-import { rolesQuery } from "@/features/roles/queries";
+import { rolesQuery } from "@/features/roles";
 import { formatDateTime } from "@/lib/format";
 
 // assignRoleTo 只在新建普通员工时传：他还没有角色，关掉对话框后引导去分配（没有角色时先去建）。

@@ -584,7 +584,7 @@ func TestReferencedTables(t *testing.T) {
 }
 
 func TestOwnerIndex_DuplicateIsDeterministic(t *testing.T) {
-	owned := map[string][]string{"alpha": {"betas"}, "beta": {"betas"}, "auth": {"users"}}
+	owned := map[string][]string{"alpha": {"betas"}, "beta": {"betas"}, "user": {"users"}}
 	for range 50 {
 		if got := ownerIndex(owned)["betas"]; got != "alpha" {
 			t.Fatalf("重复登记时应按模块名排序取第一个，got %q", got)

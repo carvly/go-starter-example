@@ -27,14 +27,14 @@
   加载，不提交）；
 - `APP_ENV` 只用来给日志/指标打标签，不允许拿它做代码分支。多环境靠同一套 key 注入
   不同的值；
-- Redis 可选：配置了 `REDIS_ADDR` 时商品缓存和限流计数用 Redis，否则商品不缓存、
-  限流按进程内存计数（启动时会 Warn 一次）。
+- Redis 可选：配置了 `REDIS_ADDR` 时缓存（模块按需接入 `internal/platform/cache`）和限流计数用 Redis，
+  否则缓存退回 Noop、限流按进程内存计数（启动时会 Warn 一次）。
 
 ## 进程与部署
 
 - `cmd/api`、`cmd/worker` 只做"加载配置 + healthcheck 子命令 + 调 `app.RunAPI` /
-  `app.RunWorker`"，不知道任何业务模块；`api migrate` 和 `api queue cancel-orphans`
-  在全量配置校验前分派，只读数据库配置；其余带参数调用交给 `app.RunCommand`，
+  `app.RunWorker`"，不知道任何业务模块；`api migrate` 在全量配置校验前分派，只读数据库配置；
+  `api queue cancel-orphans` 需要完整配置（它构造模块、从实际注册的 worker 得出任务类型）；其余带参数调用交给 `app.RunCommand`，
   执行模块提供的子命令（`api help` 列出全部）。容器里用
   `docker compose run --rm api <模块> <动作> [参数]` 运行（镜像的 `ENTRYPOINT` 是
   `/app/api`），需要和 api 相同的环境变量。退出码：0 成功，1 执行出错，2 用法错误；
@@ -55,11 +55,13 @@
   用 `docker compose run --rm api staff create -username root` 创建（见 auth.md 的“后台员工”），
   会话和日志参数是 `STAFF_*` 环境变量。前台用户的登录会话和微信凭据是 `AUTH_*` /
   `WECHAT_*` 环境变量（见 auth.md 的“前台用户”和 `configs/.env.example`）。其中
-  `AUTH_PUBLIC_BASE_URL` 是必需项，缺了 api 和 worker 都起不来；`WECHAT_*` 四个入口按产品
+  `USER_PUBLIC_BASE_URL` 是必需项，缺了 api 和 worker 都起不来；`WECHAT_*` 四个入口按产品
   需要组合，每个入口的 `_APP_ID` / `_SECRET` 成对配置才启用，只配一半启动失败；其余 `AUTH_*`
-  时长有默认值，`AUTH_COOKIE_DELIVERY_ORIGINS` 可选。
-  `AUTH_PUBLIC_BASE_URL` 和 `AUTH_COOKIE_DELIVERY_ORIGINS` 里的每一项都必须是规范的 origin
-  （小写 `scheme://host[:port]`，不带默认端口和路径），否则启动失败。compose 在 `x-auth-env` 里给了开发默认值（微信各入口默认不启用，
+  时长有默认值，`USER_COOKIE_DELIVERY_ORIGINS`、`USER_TRUSTED_IDENTITY_HEADER`（网关信任 header 模式，见
+  auth.md 的"前台鉴权"）可选。`HTTP_GLOBAL_RATE_LIMIT_PER_SECOND`、`HTTP_REQUEST_TIMEOUT`、
+  `HTTP_BODY_LIMIT_BYTES` 必须为正数，否则启动失败；默认值只在 `internal/config` 一处。
+  `USER_PUBLIC_BASE_URL` 和 `USER_COOKIE_DELIVERY_ORIGINS` 里的每一项都必须是规范的 origin
+  （小写 `scheme://host[:port]`，不带默认端口和路径），否则启动失败。compose 在 `x-user-env` 里给了开发默认值（微信各入口默认不启用，
   要用的入口在 compose 文件同级的 `.env` 里配上凭据），新增必需配置时同样要在 compose 里补默认值。compose 里
   后台监听 8081（页面和接口都在这个端口，
   只发布到宿主机的 127.0.0.1），`HTTP_ADMIN_ORIGIN` 默认 `http://localhost:8081`；
@@ -78,7 +80,7 @@
   SameSite=Strict，浏览器授权流程的绑定 cookie 是 SameSite=None，跨站时会被浏览器的第三方 cookie
   限制拦掉；
 - **两张来源名单分开配**：`CORS_ALLOW_ORIGINS` 列 web 和混合 App 的 origin；
-  `AUTH_COOKIE_DELIVERY_ORIGINS` 只列 web（名单内的请求 refresh token 只进 cookie）；
+  `USER_COOKIE_DELIVERY_ORIGINS` 只列 web（名单内的请求 refresh token 只进 cookie）；
 - **微信 API 的 IP 白名单**：各类微信应用开启 API IP 白名单后，服务端的出口 IP 要逐个登记，否则
   报 40164；部署时固定出口 IP（NAT）；
 - **平台侧的回调配置都指向 API 域名**：服务号"网页授权域名"填全域名、不带协议，域名需要备案并在根
@@ -145,15 +147,15 @@ postgres 18 起官方镜像的 `PGDATA` 是 `/var/lib/postgresql/<大版本>/doc
 
 | job | 内容 |
 |---|---|
-| test | vet、golangci-lint（两者都带 `integration`、`genfixture` tag，见 `.golangci.yml` 的 `run.build-tags`）、`shellcheck -x scripts/*.sh`、govulncheck、`go mod verify`、生成代码一致性（`go generate ./...` 后，各模块 `httpapi/oapi`、`adminapi/oapi` 的 `api.gen.go` 和 `web/admin/src/api/meta.gen.ts` 不能有改动）、tidy 一致性、`go test ./...`（含架构测试）、`scripts/check-docs.sh`、`scripts/check-versions.sh`、构建 |
-| integration | `go test -tags=integration ./...`，testcontainers 起真实 Postgres |
-| gitleaks | 密钥泄露扫描 |
+| test | vet、golangci-lint（两者都带 `integration`、`genfixture` tag，见 `.golangci.yml` 的 `run.build-tags`）、`shellcheck -x scripts/*.sh`、govulncheck、`make actionlint`（workflow 文件）、`go mod verify`、生成代码一致性（`go generate ./...` 后，各模块 `httpapi/oapi`、`adminapi/oapi` 的 `api.gen.go` 和 `web/admin/src/api/meta.gen.ts` 不能有改动）、tidy 一致性、`go test ./...`（含架构测试）、`scripts/check-docs.sh`、`scripts/check-versions.sh`、构建 |
+| integration | `go test -tags=integration ./...`，testcontainers 起真实 Postgres；先装后台前端依赖（升级工具和删除执行器的集成测试要重新生成前端） |
+| gitleaks | 密钥泄露扫描：`make gitleaks`（开源 CLI，版本固定在 Makefile；不用 gitleaks-action，它对组织账号要求付费许可证） |
 | openapi-lint | redocly 校验 spec |
 | docker-build | api / worker 镜像能构建 |
-| compose-integration | 起完整栈，经后台接口建商品（CLI 建超级管理员、登录、改密），前台下单后确认 worker 把订单确认为 confirmed |
+| compose-integration | 起完整栈，等 api `/readyz` 与 worker 健康；按 `starter-removed.yaml` 跑 starter 通用冒烟（`scripts/ci-staff-smoke.sh`：CLI 建管理员、登录、改密、员工与角色、操作日志；worker 启动时执行 user 清理任务），再跑项目的 `project/ci/smoke.sh`（存在时） |
 
 `.github/workflows/modules.yml`：只在 `internal/**`、`api/**`、`web/admin/src/**`、
-`web/admin/scripts/**` 变化时跑 `scripts/check-module-removal.sh`（约 1 分钟）。它先装好后台前端的
+`web/admin/scripts/**`、`tools/starter/**`（删除演练的执行器）变化时跑 `scripts/check-module-removal.sh`（约 1 分钟）。它先装好后台前端的
 依赖：演练要删掉模块的后台页面再做类型检查，CI 里（设置了 `CI` 环境变量）没装依赖时脚本直接失败，
 不会悄悄跳过。
 
@@ -165,7 +167,7 @@ postgres 18 起官方镜像的 `PGDATA` 是 `/var/lib/postgresql/<大版本>/doc
 `.github/workflows/generator.yml`：生成器的夹具 CI（见 [generator.md](generator.md) 的“夹具与 CI”），
 在仓库的临时副本里用 `tools/gen/testdata/` 的每份夹具和两份示例生成代码，再跑检查；按编号分成 7 片
 并行，每片上限 25 分钟。
-`tools/gen/**`、生成代码依赖的公共包和前端零件（`internal/platform/postgres/`、
+`tools/gen/**`、`tools/internal/**`（生成器从代码推导模块信息的共享包）、提供前台登录检查的 `internal/modules/user/module.go`、生成代码依赖的公共包和前端零件（`internal/platform/postgres/`、
 `internal/platform/httpserver/`、`web/admin/src/lib/`、`web/admin/src/components/` 等，以工作流里的
 `paths` 为准）、两份 spec、`.golangci.yml` 变化时运行，另外每周一定时跑一次。各分片共用 `warm-cache`
 job 准备的缓存（Go 依赖、编译结果、golangci-lint 及其分析缓存），`go.sum` 和 `Makefile` 不变时直接命中。

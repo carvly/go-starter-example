@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { UserRound as NavIcon } from "lucide-react";
 
 import { listUsersMeta } from "@/api/meta.gen";
-import { page } from "@/features/auth/guard";
+import { page } from "@/lib/guard";
 import { UsersPage } from "@/features/users/list-page";
 
 export const Route = createFileRoute("/_authed/users/")({

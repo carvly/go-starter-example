@@ -7,7 +7,7 @@ import { type DataTableColumn, DataTable } from "@/components/data-table";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { useMe } from "@/features/auth/queries";
+import { useMe } from "@/lib/session";
 import { formatDateTime } from "@/lib/format";
 import { describeUserAgent } from "@/lib/user-agent";
 

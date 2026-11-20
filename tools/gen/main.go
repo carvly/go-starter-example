@@ -4,13 +4,14 @@
 //	go run ./tools/gen plan    <描述文件> [--json]   推出的名字、将要新建的文件和插入的位置，不写文件
 //	go run ./tools/gen apply   <描述文件> [--json]   生成
 //	go run ./tools/gen drift   <描述文件> [--json]   列出生成之后改过的地方
+//	go run ./tools/gen revert  <描述文件>            精确回退一次生成（删新建的路径，共享文件还原成生成前的原样）
 //	go run ./tools/gen fixture <描述文件>            把描述文件存为回归夹具（tools/gen/testdata/）
 //	go run ./tools/gen example admin|web             打印带注释的完整描述文件
 //	go run ./tools/gen schema                        打印描述文件的 JSON Schema
 //	go run ./tools/gen meta <admin.yaml> <meta.gen.ts>   从后台 spec 生成前端的字段文案与校验（make generate 调用）
 //
 // 退出码：0 成功；1 描述文件或 spec 有错误（逐条列出位置和改法）；2 环境问题（不在仓库根目录、
-// 工作区不干净、目标文件已存在、用法错误）。
+// 目标文件已存在、用法错误）。
 package main
 
 import (
@@ -28,6 +29,7 @@ import (
 
 const usage = `用法：
   go run ./tools/gen check|plan|apply|drift <描述文件> [--json]
+  go run ./tools/gen revert <描述文件>
   go run ./tools/gen fixture <描述文件>
   go run ./tools/gen example admin|web
   go run ./tools/gen schema
@@ -54,7 +56,7 @@ func run(args []string) int {
 	}
 	var err error
 	switch cmd := args[0]; cmd {
-	case "check", "plan", "apply", "drift", "fixture":
+	case "check", "plan", "apply", "drift", "fixture", "revert":
 		if len(args) != 2 {
 			err = exitErr{2, usage}
 			break
@@ -127,7 +129,7 @@ func descriptorCmd(cmd, file string, asJSON bool) error {
 	if len(problems) == 0 {
 		problems = append(problems, resource.Validate(p)...)
 	}
-	if cmd != "drift" && cmd != "fixture" && !hasErrors(problems) {
+	if cmd != "drift" && cmd != "fixture" && cmd != "revert" && !hasErrors(problems) {
 		problems = append(problems, repo.Check(p)...)
 	}
 	var errs, hints []resource.Problem
@@ -156,7 +158,11 @@ func descriptorCmd(cmd, file string, asJSON bool) error {
 	}
 	switch cmd {
 	case "fixture":
-		dst := filepath.Join("tools/gen/testdata", p.D.Module+"_"+p.D.Resource+".yaml")
+		// 和手写的夹具同一套命名：fixture_<资源>.yaml；已有同名夹具时不覆盖，由人决定改名还是替换。
+		dst := filepath.Join("tools/gen/testdata", "fixture_"+p.D.Resource+".yaml")
+		if _, err := os.Stat(dst); err == nil {
+			return fmt.Errorf("%w：%s 已经存在，先改名或删除旧夹具", resource.ErrEnv, dst)
+		}
 		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 			return err
 		}
@@ -165,6 +171,12 @@ func descriptorCmd(cmd, file string, asJSON bool) error {
 		}
 		fmt.Println("已存为回归夹具：" + dst + "（和这次的改动一起提交）")
 		return nil
+	case "revert":
+		done, err := repo.Revert(p.D.Resource)
+		for _, d := range done {
+			fmt.Println(d)
+		}
+		return err
 	case "drift":
 		items, err := repo.Drift(p.D.Resource)
 		if err != nil {
@@ -215,7 +227,7 @@ func descriptorCmd(cmd, file string, asJSON bool) error {
 			fmt.Printf("     %s\n", t.Reference)
 		}
 	}
-	fmt.Println("\n回退（补足之前确认生成结果，回退会丢掉补足的代码）：\n  " + res.Revert)
+	fmt.Println("\n回退（补足之前确认生成结果，回退会丢掉补足的代码和生成后对共享文件的改动）：\n  go run ./tools/gen revert " + file)
 	return nil
 }
 

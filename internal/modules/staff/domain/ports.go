@@ -5,9 +5,11 @@ import (
 	"time"
 )
 
-// Repository 由本模块的 postgres 子包实现。多条语句的写操作（替换角色权限、删除角色）
-// 由 Service 包在 UnitOfWork 里。
-type Repository interface {
+// 端口按关注点拆分，Service 的各个文件只依赖自己用到的那个。本模块的 postgres 子包用一个类型实现全部端口；
+// 多条语句的写操作（替换角色权限、删除角色）由 Service 包在 UnitOfWork 里。
+
+// AccountRepository 是员工账号。
+type AccountRepository interface {
 	// CreateAccount 在用户名唯一约束冲突时返回 ErrUsernameTaken。
 	CreateAccount(ctx context.Context, a *Account) error
 	GetAccount(ctx context.Context, id string) (*Account, error)
@@ -26,7 +28,10 @@ type Repository interface {
 	CountActiveSuperAdmins(ctx context.Context) (int, error)
 	SetStatus(ctx context.Context, id string, status Status) error
 	SetSuperAdmin(ctx context.Context, id string, superAdmin bool) error
+}
 
+// SessionRepository 是后台会话。
+type SessionRepository interface {
 	CreateSession(ctx context.Context, s *Session, tokenHash string) error
 	// Authenticate 用一条查询校验会话（未吊销、未过期、未空闲超时）和账号（active），
 	// 不满足时返回 ErrSessionInvalid。
@@ -39,7 +44,10 @@ type Repository interface {
 	RevokeSessions(ctx context.Context, staffID, exceptSessionID string) error
 	// ListSessions 按登录时间倒序返回最近 limit 个会话（含已吊销的）。
 	ListSessions(ctx context.Context, staffID string, limit int) ([]*Session, error)
+}
 
+// RoleRepository 是角色、权限码和员工的角色绑定。
+type RoleRepository interface {
 	// CreateRole / UpdateRole 在角色名冲突时返回 ErrRoleNameTaken，不写 Permissions。
 	CreateRole(ctx context.Context, r *Role) error
 	UpdateRole(ctx context.Context, r *Role) error
@@ -56,7 +64,10 @@ type Repository interface {
 	HasPermission(ctx context.Context, staffID, permission string) (bool, error)
 	// Permissions 返回员工经角色得到的全部权限码（去重、按字典序）。
 	Permissions(ctx context.Context, staffID string) ([]string, error)
+}
 
+// AuditRepository 是操作日志，登录退避也按它计数。
+type AuditRepository interface {
 	RecordAudit(ctx context.Context, e *AuditEntry) error
 	QueryAudit(ctx context.Context, f AuditFilter) ([]*AuditEntry, string, error)
 	// LoginFailures 数 loginKey（用户名摘要）在 ip 上的 login_failed 次数，只数 since 和这个
@@ -64,6 +75,14 @@ type Repository interface {
 	LoginFailures(ctx context.Context, loginKey, ip string, since time.Time) (count int, last time.Time, err error)
 	// PurgeAudit 删除 before 之前的日志，返回删除的行数。
 	PurgeAudit(ctx context.Context, before time.Time) (int64, error)
+}
+
+// Repository 是全部端口的组合，构造 Service 时一次传入。
+type Repository interface {
+	AccountRepository
+	SessionRepository
+	RoleRepository
+	AuditRepository
 }
 
 // PasswordVerifier 由 internal/platform/crypto 的 Argon2id 实现满足。

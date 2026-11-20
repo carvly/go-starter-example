@@ -13,6 +13,8 @@ import (
 	"strings"
 
 	"go.yaml.in/yaml/v4"
+
+	"app.local/tools/internal/modinfo"
 )
 
 // Repo 是仓库现状：生成之前要检查的冲突，以及推出 migration 序号、go module 路径。
@@ -68,7 +70,7 @@ func (r *Repo) Check(p *Parsed) []Problem {
 	}
 	n := DeriveNames(d)
 	if exists(r.path("internal/modules/" + d.Module)) {
-		c.add("REPO-MODULE-EXISTS", "module", "模块 "+d.Module+" 已经存在", "第一版只支持新模块：换一个模块名；要在已有模块里加资源，目前只能手写（规划见 docs/proposals/0005）")
+		c.add("REPO-MODULE-EXISTS", "module", "模块 "+d.Module+" 已经存在", "只支持新模块：换一个模块名；要在已有模块里加资源，手写")
 	}
 	if owner := r.tableOwner(n.Table); owner != "" {
 		c.add("REPO-TABLE-EXISTS", "resource", "表 "+n.Table+" 已经存在（"+owner+"）", "换一个资源名，或者写 plural 换一个表名；已有的表不经生成器（见 generator.md 的\"什么时候不用\"）")
@@ -80,16 +82,49 @@ func (r *Repo) Check(p *Parsed) []Problem {
 		}
 	}
 	if d.Web != nil && len(d.Web.Auth) > 0 {
-		modules, _ := os.ReadFile(r.path("internal/app/modules.go"))
-		module, _ := os.ReadFile(r.path("internal/modules/auth/module.go"))
+		provider, err := r.userAuthModule()
 		switch {
-		case !bytes.Contains(modules, []byte("authM := ")):
-			c.add("REPO-AUTH-MISSING", "web.auth", "web.auth 需要 auth 模块提供的登录检查，但组合根里没有 auth 模块", "去掉 web.auth，或者先恢复 auth 模块")
-		case !bytes.Contains(module, []byte("func (m *Module) Middleware() echo.MiddlewareFunc")):
-			c.add("REPO-AUTH-MISSING", "web.auth", "web.auth 需要 auth 模块的 Middleware()（生成的代码调用 authM.Middleware()），但 internal/modules/auth/module.go 里没有它", "去掉 web.auth，或者先给 auth 模块恢复 Middleware()")
+		case err != nil:
+			c.add("REPO-AUTH-MISSING", "web.auth", "web.auth 需要唯一一个提供前台登录检查的模块："+err.Error(), "只保留一个模块的 func (m *Module) Middleware() echo.MiddlewareFunc")
+		case provider == "":
+			c.add("REPO-AUTH-MISSING", "web.auth", "web.auth 需要提供前台登录检查的模块（module.go 里有 func (m *Module) Middleware() echo.MiddlewareFunc），但没有找到", "去掉 web.auth，或者先恢复提供前台登录的模块")
 		}
 	}
 	return c.problems
+}
+
+// userAuthModule 是提供前台登录检查的模块，从代码推导（见 modinfo.UserAuthProvider）。
+func (r *Repo) userAuthModule() (string, error) {
+	src := fsSource{root: r.Root}
+	files, err := src.Files()
+	if err != nil {
+		return "", err
+	}
+	return modinfo.UserAuthProvider(src, modinfo.List(files))
+}
+
+// fsSource 读工作区文件，实现 modinfo.Source。
+type fsSource struct{ root string }
+
+func (s fsSource) Read(name string) (string, error) {
+	data, err := os.ReadFile(filepath.Join(s.root, filepath.FromSlash(name)))
+	return string(data), err
+}
+
+func (s fsSource) Files() ([]string, error) {
+	matches, err := filepath.Glob(filepath.Join(s.root, "internal/modules/*/module.go"))
+	if err != nil {
+		return nil, err
+	}
+	out := make([]string, 0, len(matches))
+	for _, m := range matches {
+		rel, err := filepath.Rel(s.root, m)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, filepath.ToSlash(rel))
+	}
+	return out, nil
 }
 
 func (r *Repo) tableOwner(table string) string {
@@ -187,23 +222,21 @@ func specConflicts(spec []byte, want specNames) []string {
 	return slices.Compact(out)
 }
 
-// CheckWorkspace 检查工作区：已跟踪的文件不能有修改，要写的路径下不能有未跟踪的文件（回退时
-// 会删掉这次新建的文件，不能误删别的）。其它未跟踪的文件（如个人笔记）不影响。
+// CheckWorkspace 检查要新建的路径下没有任何文件（已跟踪或未跟踪）：回退时会整个删掉这些路径，不能误删别的。
+// 其它文件有没有未提交的改动不影响——被插入的共享文件在写入前留了原样，回退按原样还原。
 func (r *Repo) CheckWorkspace(paths []string) error {
-	out, err := r.git("status", "--porcelain", "--untracked-files=no")
+	args := append([]string{"status", "--porcelain", "--untracked-files=all", "--"}, paths...)
+	out, err := r.git(args...)
 	if err != nil {
 		return fmt.Errorf("%w：%v", ErrEnv, err)
 	}
 	if strings.TrimSpace(out) != "" {
-		return fmt.Errorf("%w：已跟踪的文件有修改，先提交或暂存（git stash）再生成，回退时才不会丢掉它们：\n%s", ErrEnv, out)
+		return fmt.Errorf("%w：要写的路径下已经有文件，先移走或删掉：\n%s", ErrEnv, out)
 	}
-	args := append([]string{"status", "--porcelain", "--"}, paths...)
-	out, err = r.git(args...)
-	if err != nil {
-		return fmt.Errorf("%w：%v", ErrEnv, err)
-	}
-	if strings.TrimSpace(out) != "" {
-		return fmt.Errorf("%w：要写的路径下有未跟踪的文件，先移走或删掉：\n%s", ErrEnv, out)
+	for _, p := range paths {
+		if exists(r.path(p)) {
+			return fmt.Errorf("%w：%s 已经存在，先移走或删掉", ErrEnv, p)
+		}
 	}
 	return nil
 }

@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/riverqueue/river"
-
 	"app.local/internal/config"
 	"app.local/internal/kit/lifecycle"
 	"app.local/internal/platform/httpserver"
@@ -28,8 +26,9 @@ func RunWorker(ctx context.Context, cfg *config.Config, logger *slog.Logger) err
 	defer in.Close()
 
 	mods := buildModules(in, configs)
-	queue.WarnOrphans(ctx, in.Pool, workerKinds(), logger)
-	workClient, err := queue.NewClient(in.Pool, newWorkers(mods), periodicJobs(mods))
+	workers := newWorkers(mods)
+	queue.WarnOrphans(ctx, in.Pool, workers.Kinds(), logger)
+	workClient, err := queue.NewClient(in.Pool, workers, periodicJobs(mods))
 	if err != nil {
 		return fmt.Errorf("app: build queue worker client: %w", err)
 	}
@@ -40,8 +39,9 @@ func RunWorker(ctx context.Context, cfg *config.Config, logger *slog.Logger) err
 	)
 }
 
-func newWorkers(mods *Modules) *river.Workers {
-	workers := river.NewWorkers()
+// newWorkers 注册各模块的 worker；返回值的 Kinds() 是本二进制能处理的任务清单的唯一来源。
+func newWorkers(mods *Modules) *queue.Workers {
+	workers := queue.NewWorkers()
 	for _, register := range mods.jobRegistrars() {
 		register(workers)
 	}

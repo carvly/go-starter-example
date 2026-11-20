@@ -40,6 +40,7 @@ type Model struct {
 
 	WebList, WebGet, WebCreate bool
 	WebAuth                    []string // 需要登录的 operationId
+	WebAuthModule              string   // 提供前台登录检查的模块（WebAuth 非空时由 MakePlan 从代码推导）
 
 	Migration string // 新 migration 的序号前缀，如 0008
 }

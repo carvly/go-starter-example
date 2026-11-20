@@ -34,6 +34,8 @@ echo
 echo "== Makefile 固定版本的工具（同步改 CI，见 scripts/check-versions.sh）"
 pinned_tool "golangci-lint" "github.com/golangci/golangci-lint/v2" "$(sed -n 's/^GOLANGCI_LINT_VERSION := //p' Makefile)"
 pinned_tool "govulncheck" "golang.org/x/vuln" "$(sed -n 's/^GOVULNCHECK := .*govulncheck@\(v[0-9.]*\).*/\1/p' Makefile)"
+pinned_tool "actionlint" "github.com/rhysd/actionlint" "$(sed -n 's/^ACTIONLINT := .*actionlint@\(v[0-9.]*\).*/\1/p' Makefile)"
+pinned_tool "gitleaks" "github.com/zricethezav/gitleaks/v8" "$(sed -n 's/^GITLEAKS := .*gitleaks\/v8@\(v[0-9.]*\).*/\1/p' Makefile)"
 
 echo
 echo "== 后台前端依赖（web/admin；Latest 和 Current 同一个大版本的，make upgrade 会升，跨大版本的要人改）"

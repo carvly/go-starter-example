@@ -5,7 +5,7 @@ import { listProductsMeta, productMeta } from "@/api/meta.gen";
 import { type DataTableColumn, DataTable, PagePager } from "@/components/data-table";
 import { DateTimeCell, MoneyCell, NumberCell, TextCell, actionsColumn } from "@/components/data-table/cells";
 import { SearchInput } from "@/components/filters";
-import { useCan } from "@/features/auth/queries";
+import { useCan } from "@/lib/session";
 
 import { AdjustStockDialog } from "./adjust-stock-dialog";
 import { CreateProductDialog, EditProductDialog } from "./product-form-dialog";

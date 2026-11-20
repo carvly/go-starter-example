@@ -18,12 +18,13 @@ on:
     branches: [main]
     paths:
       - "tools/gen/**"
+      - "tools/internal/**"
+      - "internal/modules/user/module.go"
       - "internal/kit/page/**"
       - "internal/platform/postgres/**"
       - "internal/platform/httpserver/**"
       - "web/admin/src/lib/**"
       - "web/admin/src/components/**"
-      - "web/admin/src/features/auth/**"
       - "web/admin/src/api/client.ts"
       - "web/admin/src/api/errors.ts"
       - "web/admin/scripts/gen-routes.ts"
@@ -42,12 +43,13 @@ on:
   pull_request:
     paths:
       - "tools/gen/**"
+      - "tools/internal/**"
+      - "internal/modules/user/module.go"
       - "internal/kit/page/**"
       - "internal/platform/postgres/**"
       - "internal/platform/httpserver/**"
       - "web/admin/src/lib/**"
       - "web/admin/src/components/**"
-      - "web/admin/src/features/auth/**"
       - "web/admin/src/api/client.ts"
       - "web/admin/src/api/errors.ts"
       - "web/admin/scripts/gen-routes.ts"

@@ -15,7 +15,7 @@ func TestRunCommand_ListsCommandsWithoutDatabase(t *testing.T) {
 	t.Cleanup(func() { slog.SetDefault(defaultLogger) })
 	t.Setenv("JWT_SIGNING_KEY", "test-signing-key")
 	t.Setenv("JWT_KEY_ID", "test-kid")
-	t.Setenv("AUTH_PUBLIC_BASE_URL", "https://api.example.com")
+	t.Setenv("USER_PUBLIC_BASE_URL", "https://api.example.com")
 	cfg := baseTestConfig()
 	cfg.DB.DSN = "postgres://app:app@127.0.0.1:1/app?sslmode=disable&connect_timeout=1"
 

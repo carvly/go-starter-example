@@ -54,3 +54,13 @@ func LoadConfig(src *config.Source) (Config, error) {
 	}
 	return cfg, nil
 }
+
+// Redacted 是启动日志里的配置快照（staff 没有敏感配置）。
+func (c Config) Redacted() map[string]any {
+	return map[string]any{
+		"staff_session_idle_timeout": c.SessionIdleTimeout.String(),
+		"staff_session_max_age":      c.SessionMaxAge.String(),
+		"staff_temp_password_ttl":    c.TempPasswordTTL.String(),
+		"staff_audit_retention":      c.AuditRetention.String(),
+	}
+}

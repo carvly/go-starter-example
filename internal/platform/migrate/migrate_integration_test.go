@@ -39,13 +39,13 @@ func TestRunnerAndAPICommand(t *testing.T) {
 		"migrations/0001_platform.up.sql":   {Data: []byte(`CREATE TABLE platform_items (id int);`)},
 		"migrations/0001_platform.down.sql": {Data: []byte(`DROP TABLE platform_items;`)},
 	}
-	auth := fstest.MapFS{
+	user := fstest.MapFS{
 		"migrations/0001_users.up.sql":    {Data: []byte(`CREATE TABLE auth_users (id int);`)},
 		"migrations/0001_users.down.sql":  {Data: []byte(`DROP TABLE auth_users;`)},
 		"migrations/0002_events.up.sql":   {Data: []byte(`CREATE TABLE auth_events (id int);`)},
 		"migrations/0002_events.down.sql": {Data: []byte(`DROP TABLE auth_events;`)},
 	}
-	runner, err := migrate.NewRunner(dsn, []migrate.Source{{Name: "test_platform", FS: platform}, {Name: "test_auth", FS: auth}})
+	runner, err := migrate.NewRunner(dsn, []migrate.Source{{Name: "test_platform", FS: platform}, {Name: "test_user", FS: user}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,14 +59,14 @@ func TestRunnerAndAPICommand(t *testing.T) {
 	if len(versions) != 2 || versions[0].Version != 1 || versions[1].Version != 2 {
 		t.Fatalf("versions = %+v", versions)
 	}
-	if err := runner.Down("test_auth"); err != nil {
+	if err := runner.Down("test_user"); err != nil {
 		t.Fatal(err)
 	}
 	versions, err = runner.Versions()
 	if err != nil || versions[0].Version != 1 || versions[1].Version != 1 {
 		t.Fatalf("down 后 versions = %+v, %v", versions, err)
 	}
-	if err := runner.Force("test_auth", 1); err != nil {
+	if err := runner.Force("test_user", 1); err != nil {
 		t.Fatal(err)
 	}
 	versions, err = runner.Versions()
@@ -88,7 +88,7 @@ func TestRunnerAndAPICommand(t *testing.T) {
 		"CONFIG_FILE=",
 		"JWT_SIGNING_KEY=",
 		"JWT_KEY_ID=",
-		"AUTH_PUBLIC_BASE_URL=",
+		"USER_PUBLIC_BASE_URL=",
 		"CORS_ALLOW_ORIGINS=",
 	)
 	if out, err := cmd.CombinedOutput(); err != nil {

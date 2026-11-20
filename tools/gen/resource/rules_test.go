@@ -121,8 +121,7 @@ func fakeRepo(t *testing.T, withAuth bool) string {
 	modules := "package app\n"
 	files := map[string]string{}
 	if withAuth {
-		modules += "func f() { authM := 1; _ = authM }\n"
-		files["internal/modules/auth/module.go"] = "package auth\n\nfunc (m *Module) Middleware() echo.MiddlewareFunc { return nil }\n"
+		files["internal/modules/user/module.go"] = "package user\n\nfunc (m *Module) Middleware() echo.MiddlewareFunc { return nil }\n"
 	}
 	spec := "openapi: 3.2.0\ntags: []\npaths:\n  /accounts:\n    get: {}\ncomponents:\n  schemas:\n    Account: {}\n"
 	for f, content := range map[string]string{
@@ -182,15 +181,15 @@ func TestRules_EveryProblemIsRegistered(t *testing.T) {
 	}
 }
 
-// 每个规则编号在 generator.md 里有同名的小节（锚点是编号的小写），规则和文档不会脱节。
+// 每个规则编号在 generator-rules.md 里有同名的小节（锚点是编号的小写），规则和文档不会脱节。
 func TestRules_DocumentedInGeneratorMD(t *testing.T) {
-	doc, err := os.ReadFile("../../../docs/agents/generator.md")
+	doc, err := os.ReadFile("../../../docs/agents/generator-rules.md")
 	if err != nil {
 		t.Fatal(err)
 	}
 	for rule := range Rules {
 		if !regexp.MustCompile(`(?m)^#{3,4} ` + regexp.QuoteMeta(rule) + `$`).Match(doc) {
-			t.Errorf("docs/agents/generator.md 缺少规则 %s 的小节（### %s）", rule, rule)
+			t.Errorf("docs/agents/generator-rules.md 缺少规则 %s 的小节（### %s）", rule, rule)
 		}
 	}
 }
@@ -200,16 +199,26 @@ func TestRepoAuthMissing(t *testing.T) {
 	if !slices.ContainsFunc(probs, func(p Problem) bool { return p.Rule == "REPO-AUTH-MISSING" }) {
 		t.Errorf("没有报出 REPO-AUTH-MISSING：%v", probs)
 	}
-	// 组合根里有 auth 模块，但它没有 Middleware()：生成的 authM.Middleware() 编译不过。
-	root := fakeRepo(t, true)
-	if err := os.WriteFile(filepath.Join(root, "internal/modules/auth/module.go"), []byte("package auth\n"), 0o644); err != nil {
+	// 提供者从代码推导：换了名字的模块只要有 Middleware() 就能用。
+	root := fakeRepo(t, false)
+	if err := os.MkdirAll(filepath.Join(root, "internal/modules/member"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "internal/modules/member/module.go"), []byte("package member\n\nfunc (m *Module) Middleware() echo.MiddlewareFunc { return nil }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if probs = checkAll(t, root, webBase+"  auth: [create]\n"); slices.ContainsFunc(probs, func(p Problem) bool { return p.Rule == "REPO-AUTH-MISSING" }) {
+		t.Errorf("换名的提供者没有被识别：%v", probs)
+	}
+	// 两个提供者：生成的代码不知道用哪个。
+	if err := os.WriteFile(filepath.Join(root, "internal/modules/existing/module.go"), []byte("package existing\n\nfunc (m *Module) Middleware() echo.MiddlewareFunc { return nil }\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	probs = checkAll(t, root, webBase+"  auth: [create]\n")
 	if !slices.ContainsFunc(probs, func(p Problem) bool {
-		return p.Rule == "REPO-AUTH-MISSING" && strings.Contains(p.Message, "Middleware()")
+		return p.Rule == "REPO-AUTH-MISSING" && strings.Contains(p.Message, "唯一")
 	}) {
-		t.Errorf("auth 模块没有 Middleware() 时没有报出 REPO-AUTH-MISSING：%v", probs)
+		t.Errorf("两个提供者时没有报出 REPO-AUTH-MISSING：%v", probs)
 	}
 }
 

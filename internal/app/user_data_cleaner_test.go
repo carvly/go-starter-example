@@ -7,18 +7,18 @@ import (
 	"github.com/riverqueue/river"
 
 	"app.local/internal/kit/uow/uowtest"
-	"app.local/internal/modules/auth"
-	"app.local/internal/modules/auth/domain"
-	"app.local/internal/modules/auth/domain/domaintest"
-	"app.local/internal/modules/auth/events"
-	"app.local/internal/modules/auth/jobs"
+	"app.local/internal/modules/user"
+	"app.local/internal/modules/user/domain"
+	"app.local/internal/modules/user/domain/domaintest"
+	"app.local/internal/modules/user/events"
+	"app.local/internal/modules/user/jobs"
 )
 
 type userDataFixture struct {
 	rows map[string]string
 }
 
-func (f *userDataFixture) UserDataCleaner() auth.UserDataCleaner { return f }
+func (f *userDataFixture) UserDataCleaner() user.DataCleaner { return f }
 
 func (f *userDataFixture) DeleteUserData(_ context.Context, userID string) error {
 	delete(f.rows, userID)
@@ -45,7 +45,7 @@ func (f *userDataFixture) Sweep(ctx context.Context, profiles func(context.Conte
 
 func TestUserDataFixture_DeletedEventRunsCleaner(t *testing.T) {
 	member := &userDataFixture{rows: map[string]string{"u1": "data", "u2": "keep"}}
-	worker := jobs.NewUserDeletedWorker([]auth.UserDataCleaner{member.UserDataCleaner()})
+	worker := jobs.NewUserDeletedWorker([]user.DataCleaner{member.UserDataCleaner()})
 	job := &river.Job[events.UserDeleted]{Args: events.UserDeleted{UserID: "u1"}}
 	if err := worker.Work(t.Context(), job); err != nil {
 		t.Fatal(err)

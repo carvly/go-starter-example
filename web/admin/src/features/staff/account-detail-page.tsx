@@ -10,8 +10,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { toast } from "@/components/ui/toast";
-import { useMe } from "@/features/auth/queries";
-import { rolesQuery } from "@/features/roles/queries";
+import { useMe } from "@/lib/session";
+import { RoleFlowGuide, rolesQuery } from "@/features/roles";
 import { formatDateTime } from "@/lib/format";
 
 import { AccountBadges } from "./badges";
@@ -24,7 +24,6 @@ import {
   useSetAccountRoles,
   useSetSuperAdmin,
 } from "./queries";
-import { RoleFlowGuide } from "./role-guide";
 import { type TempPassword, TempPasswordDialog } from "./temp-password-dialog";
 
 export function AccountDetailPage({ id }: { id: string }) {

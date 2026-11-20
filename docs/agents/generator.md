@@ -18,8 +18,8 @@
 
 - **用**：新模块里的一个新资源，表还不存在，开放到后台（`admin`）或前台（`web`）其中一个。
 - **不用**：
-  - auth：前台登录的代码是手写的，生成器管理范围之外，不再对 auth 重新
-    `gen apply`；`tools/gen/testdata/auth_user.yaml` 只作为回归夹具。
+  - user 模块：前台登录的代码是手写的，生成器管理范围之外，不再对它重新
+    `gen apply`；`tools/gen/testdata/fixture_user.yaml` 只作为回归夹具。
   - 已有的表（`user_sessions`、`staff_accounts`……）：它们的写操作要经过已有 Service 里的业务规则（硬规则 2）。
     这类页面手写，在已有 Service 上加 `adminapi/`，见 [modules.md](modules.md)、[http.md](http.md)。
   - 已有模块里加第二张表、同时开放到后台和前台、跨表引用：第一版不支持，手写。
@@ -34,13 +34,14 @@
 3. **核对规划**：运行 `go run ./tools/gen plan .gen/<资源>.yaml`。看推出的名字对不对（不规则复数
    补写 `plural`），要新建哪些文件、插在哪里。
 4. **生成**：运行 `go run ./tools/gen apply .gen/<资源>.yaml`。
-   - 生成器要求已跟踪的文件没有修改。AI 不能自行提交或 `git stash`（硬规则 10），同一个任务里
-     已经改过别的文件时，按 [known-friction.md](known-friction.md) 的临时做法在副本里生成再拷回。
+   - 工作区可以有未提交的改动：生成器只要求要新建的路径（模块目录、后台页面目录）下没有任何文件。写入前
+     把要改的已有文件（被插入的 spec、`modules.go`、`migrate.go`，以及会重新生成的 `meta.gen.ts`、
+     `schema.d.ts`、`routeTree.gen.ts`）原样存进 `.gen/<资源>/before/`，回退按它还原。
    - 写完会自动运行 `go generate ./...`（含 `meta.gen.ts`）、`go build ./...`、archtest 和注册测试；
      后台资源还会在 `web/admin` 里运行 `pnpm gen:api`（接口类型）、`pnpm gen:routes`（路由树）、
      oxfmt（格式化生成的页面）和 `pnpm typecheck`。`web/admin` 还没有 `pnpm install`
      （没有 `node_modules`）时这几步不运行，换成一条 `frontend` 待办，写明要补跑的命令。
-   - 最后打印待办清单和回退命令。
+   - 最后打印待办清单和回退命令 `go run ./tools/gen revert .gen/<资源>.yaml`。
 5. **补足**：按待办清单逐项完成。
    - 每个 `custom` 动作：加上 Repository 方法，同时改 Postgres 实现、内存 fake 和契约用例，再实现
      Service 方法。
@@ -64,8 +65,9 @@
 8. **审核与反哺**：按下面的"审核清单"，由另一个没参与这次生成的上下文审核，再把发现落到生成器上。
    最后运行 `go run ./tools/gen fixture .gen/<资源>.yaml`，把描述文件存为回归夹具，和这次的改动一起提交。
 
-要改描述文件重新生成：先执行 `apply` 打印的回退命令，再 `apply`。补足之前先确认生成结果，
-否则回退会丢掉补足的代码。
+要改描述文件重新生成：先 `go run ./tools/gen revert .gen/<资源>.yaml`，再 `apply`。回退删掉新建的路径，
+把改过的已有文件还原成生成前的原样（生成前已有的未提交改动保留）。生成之后这些已有文件又被改过（手改，或又生成了
+别的资源）时，revert 拒绝并列出文件，什么都不动；新建路径里补足的代码会随回退删除，所以补足之前先确认生成结果。
 
 ## 命令
 
@@ -74,7 +76,8 @@ go run ./tools/gen check   <描述文件> [--json]   # 只校验，一次报出�
 go run ./tools/gen plan    <描述文件> [--json]   # 推出的名字、新建的文件、插入的位置，不写文件
 go run ./tools/gen apply   <描述文件> [--json]   # 生成
 go run ./tools/gen drift   <描述文件> [--json]   # 生成之后改过的地方（和 .gen/<资源>/snapshot/ 比较）
-go run ./tools/gen fixture <描述文件>            # 存为回归夹具 tools/gen/testdata/<模块>_<资源>.yaml
+go run ./tools/gen revert  <描述文件>            # 精确回退一次生成（按 .gen/<资源>/before/ 还原）
+go run ./tools/gen fixture <描述文件>            # 存为回归夹具 tools/gen/testdata/fixture_<资源>.yaml
 go run ./tools/gen example admin|web             # 带注释的完整描述文件
 go run ./tools/gen schema                        # 描述文件的 JSON Schema（只管结构，语义规则只有 check 查）
 go run ./tools/gen meta <admin.yaml> <meta.gen.ts>   # 从后台 spec 生成前端的字段文案与校验（make generate 调用，不用手动跑）
@@ -84,15 +87,15 @@ go run ./tools/gen meta <admin.yaml> <meta.gen.ts>   # 从后台 spec 生成前�
 - 退出码：
   - 0：成功；
   - 1：描述文件有错误；
-  - 2：环境问题和用法错误（不在仓库根目录、已跟踪的文件有修改、要写的路径下有未跟踪的文件、目标
-    文件已存在、已有同名的路由文件 `web/admin/src/routes/_authed/<tag>.tsx`、描述文件读不到、
+  - 2：环境问题和用法错误（不在仓库根目录、要新建的路径下已有文件、目标
+    文件已存在、没有可回退的生成记录、已有同名的路由文件 `web/admin/src/routes/_authed/<tag>.tsx`、描述文件读不到、
     参数不对）。
 - `--json` 的字段：
   - `check`：`{ok, problems: [{rule, file, line, col, path, message, fix, doc, hint}]}`；`hint` 为 true
     的只是提示，不影响退出码。
   - `plan`：`{names, create, insert: [{file, section, after_line, text}], hints}`。
   - `apply`：在 `plan` 的基础上加 `todo: [{kind, file, symbol, instruction, test, reference}]` 和
-    `revert`。
+    `revert`（回退命令）。
   - `drift`：`{items: [{file, symbol, kind, expected, detail}]}`。`kind` 取 `changed`、`removed`、
     `added`、`file_changed`、`file_removed`、`insert_changed`；`expected` 为 false 的就是待办清单之外的修改。
     覆盖范围：只比较生成器写过的文件（`plan` 的 `create`）和插入的内容。生成文件里新增的声明一律
@@ -418,15 +421,15 @@ web/admin/src/routes/_authed/categories/
 
 不做"重新生成再三方合并"：那就是双向同步。
 
-**自迭代的边界**：反哺只往更严、更清楚、能力更多的方向走（加规则、改清楚报错、补能力、补夹具），
-可以在同一个改动里直接做。放宽或删除规则、删除夹具、改变已有规则的含义，交给用户决定。
+**自迭代的边界**：同 [workflow.md](workflow.md) 的"任务后的摩擦回顾"——只往更严、更清楚的方向直接做（加规则、
+改清楚报错、补能力、补夹具），放宽或删除规则、删除夹具、改变已有规则的含义交给用户决定。
 
 ## 夹具与 CI
 
 - `tools/gen/testdata/` 里是回归夹具。`fixture_widget.yaml` 覆盖全部字段类型和写法，
   `fixture_goods.yaml` 是商品的形状，`fixture_readonly.yaml`（只读、没有动作）和
-  `fixture_edit_delete.yaml`（没有新建、改名动作、`like` 枚举参数、带特殊字符的说明）是前端模板的边界组合；每次真实使用后，用 `gen fixture` 存一份（如 `auth_user.yaml`）。
-  存档时 `module` 加前缀 `fx`，`resource`、`plural` 加前缀 `fx_`（如 `fxauth`、`fx_user`）：真实
+  `fixture_edit_delete.yaml`（没有新建、改名动作、`like` 枚举参数、带特殊字符的说明）是前端模板的边界组合；每次真实使用后，用 `gen fixture` 存一份，文件名是 `fixture_<资源>.yaml`（如前台用户的 `fixture_user.yaml`），同名时报错不覆盖。
+  存档时 `module` 加前缀 `fx`，`resource`、`plural` 加前缀 `fx_`（如 `fxuser`、`fx_user`）：真实
   使用过的模块、表和接口已经在仓库里，原样重新生成会冲突；夹具检查的是形状，名字不影响。
 - `go test -tags genfixture -timeout 30m ./tools/gen/` 对每份夹具和两份示例：在仓库的临时副本里
   生成，然后跑：
@@ -443,229 +446,15 @@ web/admin/src/routes/_authed/categories/
 - CI（`.github/workflows/generator.yml`）在生成器、公共包、前端零件和配置、两份 spec、
   `.golangci.yml` 变化时运行，另外每周一定时跑一次；完整的触发路径以这个文件的 `paths` 为准。它分成
   7 片并行（`GEN_FIXTURE_SHARD=0/7` … `6/7`），总耗时约等于最慢的一份；新增描述文件不用改工作流。
-  `warm-cache` job 先准备好 Go 依赖、编译好的测试和 golangci-lint 的编译结果与分析缓存，按 Go 版本、
-  `go.sum` 和 `Makefile` 命名，各分片只恢复它，不必各自从零编译。
+  分片共享的构建缓存见 [deploy-ci.md](deploy-ci.md) 的"CI"。
   本地改了其中任何路径，提交前也跑一次。
 - 生成器自己的单元测试（`go test ./tools/gen/...`）检查：
   - 每个规则编号至少被一个用例触发，报错带位置、改法和文档链接；
-  - 每个规则编号在本文有同名小节；
+  - 每个规则编号在 [generator-rules.md](generator-rules.md) 有同名小节；
   - 两份示例能通过校验；
   - 插入位置正确；
   - drift 能区分待办内外的修改。
 
 ## 规则编号
 
-报错格式：`<文件>:<行>:<列> <路径>: <问题>。改法：<怎么改>（<规则编号>，<本文的锚点>）`。
-编号发布后不改名、不复用。
-
-### YAML-SYNTAX
-
-YAML 语法错误。常见原因是缩进不对、冒号后面少了空格，或者长文本没有用块样式（`custom: >-`）。
-
-### YAML-UNKNOWN-KEY
-
-没有这个键，多半是拼错了，报错里会给出最接近的键。描述文件用严格模式解码，不认识的键不会被静默忽略。
-
-### YAML-TYPE
-
-值的类型不对：该写列表的写成了字符串、`max` 写成了非整数、`required` 不是 true/false。
-
-### TOP-REQUIRED
-
-缺少必填的顶层键：`module`、`resource`、`title`、`fields`，以及有 `admin` 时的 `display`。
-
-### TOP-MODULE-NAME
-
-模块名同时是 Go 包名和目录名，只能用小写字母和数字（小写字母开头）。也不能是 Go 关键字，或者
-组合根里已有的包名（`domain`、`postgres`、`echo`……），否则 `modules.go` 的 import 会冲突。
-
-### TOP-RESOURCE-NAME
-
-资源名用单数的 snake_case，它是表名、路径、权限码和 Go 类型名的来源。
-
-### TOP-PLURAL-NAME
-
-`plural` 用 snake_case，并且不能和 `resource` 相同。默认规则推得对时不要写。
-
-### TOP-DISPLAY
-
-`display` 必须是 required 的 `string` 字段：确认框、提示里用它代表一条记录，为空时就没法说清是哪一条。
-
-### TOP-SURFACE
-
-`admin` 和 `web` 要写且只写一个。同时开放到两边目前不支持（规划见 `docs/proposals/0005-全栈代码生成器.md`），手写。
-
-### TEXT-TITLE-CHARS
-
-名称（资源、字段、动作的 `title` 和枚举的文案）原样写进生成的页面（JSX 文本、模板字符串），所以不能有
-引号、反引号、花括号、尖括号、反斜杠和 `$`。需要说明的内容写进 `help`、`confirm`、`description`，
-它们按字符串字面量写出，没有这个限制。
-
-### FIELD-NAME
-
-字段名同时是列名和 JSON 字段名，用 snake_case。不能是系统字段（`id`、`created_at`、`updated_at`、
-`version`），也不能是 SQL 保留字（`order`、`user`、`group`……）。
-
-### FIELD-TYPE
-
-字段类型只能是 `string`、`text`、`int`、`money`、`bool`、`enum`、`date`、`datetime`。扩展一种类型
-要在生成器、前端零件和夹具里各补一处。
-
-### FIELD-TITLE-REQUIRED
-
-每个字段都要有 `title`：它是表单标签、表头和 spec 属性的 `title`（前端的文案从 spec 生成）。
-
-### FIELD-MODIFIER
-
-修饰用在了不支持的类型上，见"字段"的矩阵。例如 `bool` 不能写 `required`（总是非空），
-`text` 不能写 `unique`。
-
-### FIELD-MAX-REQUIRED
-
-`string`、`text` 必须写 `max`：数据库、接口、前端三处的长度上限都从它来，没有上限的文本会被塞进
-任意大的内容。
-
-### FIELD-MIN-MAX
-
-`min` 大于 `max`，或者长度的 `min` 为负、`max` 小于 1。
-
-### FIELD-MONEY-NAME
-
-`money` 的字段名以 `_cents` 结尾：单位是分，名字里带上单位（database.md 的命名规范），前端也按这个
-后缀识别金额。
-
-### FIELD-ENUM-VALUES
-
-`enum` 要写 `values`，取值用 snake_case，每个取值都要有中文。
-
-### FIELD-DEFAULT
-
-`default` 要符合字段的类型和约束：整数在范围内、枚举是取值之一、字符串不超过 `max`。
-
-### FIELD-IMMUTABLE-READONLY
-
-`immutable`（创建后完全不能改）和 `readonly`（只能经动作改）不能同时写。
-
-### FIELD-READONLY-UNREACHABLE
-
-`readonly` 字段要有动作能改它：某个声明式动作的 `set` 写它，或者存在 `custom` 动作。否则它是永远
-改不了的死字段；创建后不需要改的，写 `immutable`。
-
-### ADMIN-OPERATION
-
-`admin.operations` 只能写 `create`、`update`、`delete`。列表和详情总是有。
-
-### ADMIN-LIST-FIELD
-
-`admin.list` 引用了不存在的字段，或者类型不支持（`columns` 必须包含 `display` 字段：列表里它是进入
-详情页的链接）：`search` 只支持文本，`filter` 只支持枚举、布尔和
-日期，`sort` 不支持 `text`、`bool`、`enum`。`columns` 不能为空。
-
-### ADMIN-DEFAULT-SORT
-
-`default_sort` 必须在 `sort` 里（或者是 `created_at`）。
-
-### ADMIN-NAV
-
-`admin.nav.icon` 是 lucide-react 导出的组件名（PascalCase，如 `Users`），生成的路由文件直接 import 它；
-名字不存在时前端的 typecheck 失败。`group` 不能有首尾空格，已有的分组见 `web/admin/src/lib/permissions.ts`
-的 `groupOrder`，不在其中的分组排在后面。
-
-### ACTION-NAME
-
-动作名用 snake_case：它出现在权限码 `<资源>:<动作>` 和路径里。
-
-### ACTION-RESERVED
-
-动作名不能是 `create`、`update`、`delete`、`list`、`get`：它们和增删改查生成的 Service 方法、
-operationId、前端的 hook 重名。参数名不能是系统字段（`id`、`version`、`created_at`、`updated_at`）：
-`id` 是路径里的记录 ID，同名参数会在前端覆盖它，请求发到别的记录上。
-
-### ACTION-TITLE
-
-动作要有 `title`：它是按钮文字和权限页上的操作说明。
-
-### ACTION-KIND
-
-每个动作要在 `set`（声明式，完整生成）和 `custom`（自定义，生成桩由 AI 补足）里二选一。
-
-### ACTION-INPUT
-
-动作的参数不合法：名字、类型、修饰的规则同字段；参数不是表里的列，不能写 `unique`、`immutable`、
-`readonly`、`default`；`like` 要指向已声明的字段，写了 `like` 就不能再写 `type`；参数是枚举时用
-`like` 沿用字段的枚举，不单独定义（枚举类型和文案只在字段上生成一次）。
-
-### ACTION-SET
-
-`set` 的列必须是已声明且不是 `immutable` 的字段。值只能是符合字段约束的常量，或者 `input` 里类型
-一致的 `$参数`。算不出来的写成 `custom` 动作。
-
-### ACTION-WHEN
-
-`when` 只能用 `enum`、`bool` 字段，值必须是合法的取值。
-
-### ACTION-ERROR
-
-动作声明的错误不合法：只有 `custom` 动作能声明错误；错误码用 snake_case（不带资源前缀，生成时
-加）；`kind` 是 `invalid`（400）或 `conflict`（409）；要有给用户看的 `message`；`field` 要是 `input`
-里的参数。
-
-### ACTION-SET-EDITABLE
-
-提示：`set` 写的字段也能在编辑表单里改，这个动作可能是多余的。只想经动作改的字段，加 `readonly: true`。
-
-### RULE-ON
-
-`rules` 的 `on` 只能写这个资源已有的操作。`delete` 要先加进 `admin.operations`。
-
-### RULE-CUSTOM
-
-每条规则要有 `custom`：一句话写清规则、出错时返回哪个错误、有没有并发要求。它会出现在桩代码的
-注释、测试的失败信息和待办清单里。
-
-### RULE-ERROR
-
-规则声明的错误不合法，要求同 ACTION-ERROR，`field` 是 `fields` 里的字段。
-
-### WEB-OPERATION
-
-`web.operations` 只能写 `list`、`get`、`create`，不能为空。
-
-### WEB-AUTH
-
-`web.auth` 只能列 `operations` 里有的操作。
-
-### INDEX-COLUMN
-
-索引引用了不存在的列，或者没写 `columns`。
-
-### INDEX-FOR
-
-每个索引都要写 `for`，说明服务哪条查询（database.md：按查询建，不预建投机索引）。说不出就不建。
-
-### INDEX-REDUNDANT
-
-索引的列是主键、唯一约束或另一个索引的前缀，已经被覆盖了。部分索引不参与这项检查。
-
-### INDEX-MISSING
-
-提示：有排序或筛选的字段，但没有以它开头的索引。数据量大时补上索引；表很小或取值很少时，在
-汇报里说明为什么不需要。
-
-### REPO-MODULE-EXISTS
-
-模块目录已经存在。第一版只支持新模块。
-
-### REPO-TABLE-EXISTS
-
-推出的表名已经存在：登记在某个模块的 `tables.go`，或者已在`internal/modules/<m>/migrations/` 里创建。已有的表不经生成器。
-
-### REPO-SPEC-CONFLICT
-
-推出的路径、tag、operationId、schema 名，或者权限码前缀，和 spec 里已有的重复。换资源名、
-`plural` 或动作名。
-
-### REPO-AUTH-MISSING
-
-`web.auth` 需要 auth 模块提供的登录检查：组合根里要有 auth 模块，并且它有 `Middleware()`（生成的
-代码调用 `authM.Middleware()`）。
+每条错误的规则编号、含义和改法见 [generator-rules.md](generator-rules.md)。

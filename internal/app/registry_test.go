@@ -1,7 +1,6 @@
 package app
 
 import (
-	"context"
 	"fmt"
 	"go/ast"
 	"go/parser"
@@ -17,7 +16,6 @@ import (
 	"testing"
 
 	"github.com/labstack/echo/v5"
-	"github.com/riverqueue/river"
 	"go.yaml.in/yaml/v4"
 
 	"app.local/internal/platform/httpserver"
@@ -87,7 +85,7 @@ func TestModules_EveryModuleIsRegistered(t *testing.T) {
 			t.Errorf("internal/modules/%s 在 internal/app/modules.go 中被 import %d 次，want 1：新模块要在 modules.go 里 import 并在 buildModules 中构造", m, imported[m])
 		}
 		if !vars[m+"M"] {
-			t.Errorf("buildModules 里没有变量 %sM：约定每个模块构造成一个名为 <模块>M 的变量，scripts/check-module-removal.sh 依赖这个约定", m)
+			t.Errorf("buildModules 里没有变量 %sM：约定每个模块构造成一个名为 <模块>M 的变量，tools/starter 的删除执行器依赖这个约定", m)
 		}
 	}
 	for path := range imported {
@@ -97,7 +95,7 @@ func TestModules_EveryModuleIsRegistered(t *testing.T) {
 	}
 }
 
-// scripts/check-module-removal.sh 按行删除模块，依赖 modules.go 的书写约定：
+// tools/starter 的删除执行器（modules_go.go）按行删除模块，依赖 modules.go 的书写约定：
 // 每个 <m>M 的构造语句只占一行（构造参数里引用了谁就依赖谁，推导依赖只读这一行）；
 // 列出多个模块的复合字面量（Modules 返回值、注册切片）每个元素独占一行。
 func TestModules_OneLinePerModule(t *testing.T) {
@@ -144,9 +142,9 @@ func moduleLineProblems(fset *token.FileSet, f *ast.File) []string {
 				}
 			}
 		case *ast.CallExpr:
-			if sel, ok := v.Fun.(*ast.SelectorExpr); ok && sel.Sel.Name == "AddUserDataCleaner" {
+			if sel, ok := v.Fun.(*ast.SelectorExpr); ok && sel.Sel.Name == "AddDataCleaner" {
 				if len(v.Args) != 1 || line(v.Pos()) != line(v.End()) || !isModuleRef(v) {
-					problems = append(problems, fmt.Sprintf("modules.go:%d: 注销清理登记必须写成一行 authM.AddUserDataCleaner(memberM.UserDataCleaner())", line(v.Pos())))
+					problems = append(problems, fmt.Sprintf("modules.go:%d: 注销清理登记必须写成一行 userM.AddDataCleaner(memberM.UserDataCleaner())", line(v.Pos())))
 				}
 			}
 		case *ast.CompositeLit:
@@ -179,7 +177,7 @@ func TestModules_CleanerRegistrationMustBeOneLine(t *testing.T) {
 	fset := token.NewFileSet()
 	f, err := parser.ParseFile(fset, "modules.go", `package app
 func register() {
-	authM.AddUserDataCleaner(
+	userM.AddDataCleaner(
 		memberM.UserDataCleaner())
 }`, 0)
 	if err != nil {
@@ -404,28 +402,14 @@ func isHTTPMethod(m string) bool {
 
 // 事件入队后如果没有 worker 消费，任务会一直堆在队列里。
 func TestWorkers_EveryEventKindHasWorker(t *testing.T) {
-	workers := newWorkers(buildModules(newZeroInfra(), testModuleConfigs(t)))
+	kinds := newWorkers(buildModules(newZeroInfra(), testModuleConfigs(t))).Kinds()
 
 	for _, kind := range eventKinds(t) {
-		probeKind = kind
-		if err := river.AddWorkerSafely(workers, probeWorker{}); err == nil {
-			t.Errorf("事件 %q 没有对应的 worker：在消费它的模块的 RegisterJobs 里 river.AddWorker，并把该模块加进 modules.go 的 jobRegistrars", kind)
+		if !slices.Contains(kinds, kind) {
+			t.Errorf("事件 %q 没有对应的 worker：在消费它的模块的 RegisterJobs 里 queue.AddWorker，并把该模块加进 modules.go 的 jobRegistrars", kind)
 		}
 	}
 }
-
-// probeArgs 借 river.AddWorkerSafely 的"重复注册报错"判断某个 kind 是否已注册。
-var probeKind string
-
-type probeArgs struct{}
-
-func (probeArgs) Kind() string { return probeKind }
-
-type probeWorker struct {
-	river.WorkerDefaults[probeArgs]
-}
-
-func (probeWorker) Work(context.Context, *river.Job[probeArgs]) error { return nil }
 
 // eventKinds 从 internal/modules/*/events 的源码里找出所有 Kind() 的返回值，
 // 支持 return "x" 和 return 同包字符串常量两种写法。

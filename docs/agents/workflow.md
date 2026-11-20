@@ -10,7 +10,7 @@
 | 时机 | 检查 | 预算 |
 |---|---|---|
 | 每改一次 | `go build ./...`、`go test ./<改动的包>/...`、`go test ./internal/archtest/` | ≤ 10 秒 |
-| 提交前（pre-commit 钩子） | `gofmt`（暂存文件，自动修复）、`make lint-new`、`go vet`（带 `integration`、`genfixture` tag）、`scripts/doc-impact.sh --staged`（只提示）；暂存了 `.sh` 文件时跑 `shellcheck`（本机没装时跳过）；暂存了 `web/admin/` 下的文件时还跑 `web-lint`（oxlint）、`web-format`（oxfmt，会直接改写文件）、`web-ui`（`pnpm ui:check`），需要先在 `web/admin` 里 `pnpm install` | ≤ 15 秒 |
+| 提交前（pre-commit 钩子） | `gofmt`（暂存文件，自动修复）、`make lint-new`、`go vet`（带 `integration`、`genfixture` tag）、`scripts/doc-impact.sh --staged`（只提示）；暂存了 `.sh` 文件时跑 `shellcheck`（本机没装时跳过）；暂存了 `.github/workflows/` 下的文件时跑 `make actionlint`；暂存了 `web/admin/` 下的文件时还跑 `web-lint`（oxlint）、`web-format`（oxfmt，会直接改写文件）、`web-ui`（`pnpm ui:check`），需要先在 `web/admin` 里 `pnpm install` | ≤ 15 秒 |
 | 推送前（pre-push 钩子） | `go test ./...`、`scripts/check-docs.sh`、`scripts/check-versions.sh`、`go mod tidy -diff`、生成代码一致性（`go generate ./...` 后派生文件不能有改动，不一致时重新生成的结果留在工作区） | ≤ 60 秒 |
 | CI：推送到 main、PR | `.github/workflows/ci.yml`：静态检查、单元测试、集成测试、镜像构建、compose 端到端 | 分钟级 |
 | CI 按路径触发 | `.github/workflows/modules.yml`（`make check-modules`）、`admin-web.yml`（后台前端检查和端到端）、`generator.yml`（生成器夹具，也每天定时跑），见 [deploy-ci.md](deploy-ci.md) 的“CI” | 分钟级 |
@@ -42,7 +42,7 @@
 
 检查的报错信息写明了正确做法，照着改代码。以下做法等于把规则悄悄删了，不允许：
 
-- 修改测试的期望值让它通过（除非能说明期望本身是错的，并在 PR 描述里写清楚）；
+- 修改测试的期望值让它通过；
 - 往 `internal/archtest/exceptions.go` 加例外、给代码加 `//nolint`；
 - 改 `scripts/check-*.sh`、`internal/app/registry_test.go`、`Makefile`、`lefthook.yml`、
   `.golangci.yml`、`.github/` 下的工作流，让检查变宽松或跳过某些内容；
@@ -123,6 +123,9 @@ Makefile   scripts/check-*.sh   .github/workflows/**   .github/dependabot.yml
   "事实来源："、文档里引用的改动文件、这次删掉的函数和类型名，列出可能受影响的文档，逐篇对照
   代码核对，要改的在同一个改动里改。提交钩子对暂存区跑同一个检查，只提示、不拦截；
 - 规划中、还没实现的内容写进 `docs/proposals/`，不写进 `docs/agents/`；
+- 提案和既有设计是输入，不是定论：实施或引用前，逐条用 `docs/ARCHITECTURE.md`"长期演化与项目防腐"的
+  当前原则重新判断，不因为"提案里写了""以前就这样"而照做；判断后不再成立的，在同一个改动里修订提案
+  文本或改掉既有设计，并说明理由；
 - 只属于某个模块的设计说明可以放在 `internal/modules/<m>/docs/`，随模块一起删除；
 - 提案实施完后，把仍然有效的规则写进 `docs/agents/`、选型理由写进 `docs/ARCHITECTURE.md`，然后删除
   提案；没实施的部分改写成精简的提案留在 `docs/proposals/`。仓库里不保留归档文档，历史靠 git log 查；

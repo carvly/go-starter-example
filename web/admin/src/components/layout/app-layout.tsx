@@ -27,7 +27,7 @@ import {
   SidebarTrigger,
 } from "@/components/ui/sidebar";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useLogout, useMe } from "@/features/auth/queries";
+import { useLogout, useMe } from "@/lib/session";
 import { isNavActive } from "@/lib/permissions";
 
 import { useVisibleNav } from "./use-visible-nav";

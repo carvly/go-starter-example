@@ -9,7 +9,7 @@ import (
 )
 
 // Rules 是全部规则编号和一句话说明。编号发布后不改名、不复用；每个编号在
-// docs/agents/generator.md 里有同名的小节，并至少被一个测试用例触发（rules_test.go 检查）。
+// docs/agents/generator-rules.md 里有同名的小节，并至少被一个测试用例触发（rules_test.go 检查）。
 var Rules = map[string]string{
 	"YAML-SYNTAX":      "YAML 语法错误",
 	"YAML-UNKNOWN-KEY": "没有这个键",
@@ -65,7 +65,7 @@ var Rules = map[string]string{
 	"REPO-MODULE-EXISTS": "模块已存在",
 	"REPO-TABLE-EXISTS":  "表已存在",
 	"REPO-SPEC-CONFLICT": "路径、tag、权限码或 schema 与 spec 已有的重复",
-	"REPO-AUTH-MISSING":  "web.auth 需要的 auth 模块不存在",
+	"REPO-AUTH-MISSING":  "web.auth 需要的前台登录检查没有唯一的提供者",
 }
 
 var (
@@ -170,7 +170,7 @@ func (c *checker) top(d *Descriptor) {
 	case d.Admin == nil && d.Web == nil:
 		c.add("TOP-SURFACE", "", "admin 和 web 都没写", "写 admin（后台管理）或 web（前台接口）其中一个")
 	case d.Admin != nil && d.Web != nil:
-		c.add("TOP-SURFACE", "web", "第一版只能开放到一个接入面", "只保留 admin 或 web；同时开放到两边目前不支持（规划见 docs/proposals/0005）")
+		c.add("TOP-SURFACE", "web", "第一版只能开放到一个接入面", "只保留 admin 或 web；同时开放到两边不支持，另一边手写")
 	}
 	if d.Admin != nil {
 		f, ok := d.Fields.Get(d.Display)

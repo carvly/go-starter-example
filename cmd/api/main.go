@@ -21,14 +21,6 @@ func main() {
 	// 本地开发用 .env；生产环境没有这个文件，找不到就忽略。
 	_ = godotenv.Load()
 
-	if len(os.Args) > 1 && os.Args[1] == "queue" {
-		if err := app.RunQueueCommand(context.Background(), os.Args[1:], os.Stdout); err != nil {
-			fmt.Fprintln(os.Stderr, "api:", err)
-			os.Exit(1)
-		}
-		return
-	}
-
 	if len(os.Args) > 1 && os.Args[1] == "migrate" {
 		if err := app.RunMigrateCommand(os.Args[1:], os.Stdout); err != nil {
 			fmt.Fprintln(os.Stderr, "api:", err)
@@ -41,6 +33,14 @@ func main() {
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "api: load config:", err)
 		os.Exit(1)
+	}
+
+	if len(os.Args) > 1 && os.Args[1] == "queue" {
+		if err := app.RunQueueCommand(context.Background(), cfg, os.Args[1:], os.Stdout, os.Stderr); err != nil {
+			fmt.Fprintln(os.Stderr, "api:", err)
+			os.Exit(1)
+		}
+		return
 	}
 
 	// distroless 镜像里没有 curl，HEALTHCHECK 用这个子命令复用同一个二进制探活。

@@ -66,7 +66,7 @@ func NewInfra(ctx context.Context, cfg *config.Config, logger *slog.Logger) (*In
 		in.Redis = redis.NewClient(cfg.Redis.Addr, cfg.Redis.Password)
 		in.Pingers = append(in.Pingers, redis.NewPinger(in.Redis))
 	} else {
-		logger.Warn("REDIS_ADDR 未配置：商品不缓存，限流按进程内存计数，多实例部署时实际额度 = 配置值 × 实例数")
+		logger.Warn("REDIS_ADDR 未配置：缓存退回 Noop，限流按进程内存计数，多实例部署时实际额度 = 配置值 × 实例数")
 	}
 	return in, nil
 }

@@ -31,7 +31,7 @@ tags:
     description: 订单查看，只读（internal/modules/order）
   - name: users
     summary: "用户"
-    description: "前台用户。账号由登录创建，后台只能查看、停用和启用（internal/modules/auth）"
+    description: "前台用户。账号由登录创建，后台只能查看、停用和启用（internal/modules/user）"
 
 security:
   - staffSession: []

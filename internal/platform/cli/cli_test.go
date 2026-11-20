@@ -20,7 +20,7 @@ func testCommands(got *[]string) []Command {
 		{Name: "staff reset-password", Summary: "重置密码", Run: func(context.Context, []string, io.Writer) error {
 			return errors.New("boom")
 		}},
-		{Name: "auth purge", Summary: "清理", Run: func(context.Context, []string, io.Writer) error { return nil }},
+		{Name: "user purge", Summary: "清理", Run: func(context.Context, []string, io.Writer) error { return nil }},
 	}
 }
 
@@ -58,7 +58,7 @@ func TestRun_ModuleOnlyListsThatModule(t *testing.T) {
 	if code != ExitUsage {
 		t.Fatalf("code = %d, want 2", code)
 	}
-	if !strings.Contains(stderr, "staff create") || !strings.Contains(stderr, "staff reset-password") || strings.Contains(stderr, "auth purge") {
+	if !strings.Contains(stderr, "staff create") || !strings.Contains(stderr, "staff reset-password") || strings.Contains(stderr, "user purge") {
 		t.Errorf("只给模块名时应只列该模块的命令，got:\n%s", stderr)
 	}
 }
@@ -68,14 +68,14 @@ func TestRun_UnknownListsAllCommands(t *testing.T) {
 	if code != ExitUsage {
 		t.Fatalf("code = %d, want 2", code)
 	}
-	if stdout != "" || !strings.Contains(stderr, "staff create") || !strings.Contains(stderr, "auth purge") {
+	if stdout != "" || !strings.Contains(stderr, "staff create") || !strings.Contains(stderr, "user purge") {
 		t.Errorf("找不到命令时应在 stderr 列出全部命令，stdout=%q stderr=\n%s", stdout, stderr)
 	}
 }
 
 func TestRun_HelpGoesToStdout(t *testing.T) {
 	code, _, stdout, _ := run("help")
-	if code != ExitOK || !strings.Contains(stdout, "auth purge") {
+	if code != ExitOK || !strings.Contains(stdout, "user purge") {
 		t.Errorf("code = %d, stdout =\n%s", code, stdout)
 	}
 }

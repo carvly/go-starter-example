@@ -13,10 +13,10 @@ import (
 // NewClient 在 workers 为 nil 时构造只入队、不消费的 client（periodic 被
 // 忽略）；worker 进程传入注册好的 workers 并调用 Start。定时任务用 river 自带的
 // PeriodicJob，不另接 cron 库。
-func NewClient(pool *pgxpool.Pool, workers *river.Workers, periodic []Periodic) (*river.Client[pgx.Tx], error) {
+func NewClient(pool *pgxpool.Pool, workers *Workers, periodic []Periodic) (*river.Client[pgx.Tx], error) {
 	cfg := &river.Config{}
 	if workers != nil {
-		cfg.Workers = workers
+		cfg.Workers = workers.river
 		cfg.Queues = map[string]river.QueueConfig{
 			river.QueueDefault: {MaxWorkers: 100},
 		}

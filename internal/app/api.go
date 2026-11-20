@@ -1,7 +1,6 @@
 package app
 
 import (
-	"cmp"
 	"context"
 	"fmt"
 	"io/fs"
@@ -88,7 +87,7 @@ func adminServerDeps(in *Infra, mods *Modules) httpserver.AdminDeps {
 // adminStatic 是后台前端的构建产物，由 admin_ui.go 设置；没有那个文件时为 nil，不托管前端。
 var adminStatic fs.FS
 
-// globalRate 是按 IP 的全局限流额度，前台和后台各自计数、额度相同。
+// globalRate 是按 IP 的全局限流额度，前台和后台各自计数、额度相同；取值由 config 校验为正数。
 func globalRate(in *Infra) ratelimit.Limit {
-	return ratelimit.PerSecond(cmp.Or(max(in.Config.HTTP.GlobalRateLimitPerSecond, 0), 20))
+	return ratelimit.PerSecond(in.Config.HTTP.GlobalRateLimitPerSecond)
 }

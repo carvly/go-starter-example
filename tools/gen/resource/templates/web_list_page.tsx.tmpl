@@ -9,7 +9,7 @@ import { {{.FilterComponents}} } from "@/components/filters";
 import { TitleWithTip } from "@/components/info-tip";
 {{- end}}
 {{- if .HasCreate}}
-import { useCan } from "@/features/auth/queries";
+import { useCan } from "@/lib/session";
 {{- end}}
 {{- if .HasEnumFilters}}
 import { enumOptions } from "@/lib/enum-options";

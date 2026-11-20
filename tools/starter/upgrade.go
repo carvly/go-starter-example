@@ -7,18 +7,27 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 )
 
+// upgradeState 保存在项目的 git 目录里（starter-upgrade/state.json），中断后用同一版本续跑。
 type upgradeState struct {
-	Target               string `json:"target"`
-	Base                 string `json:"base"`
-	Stage                string `json:"stage"`
-	ConfirmPrecheck      bool   `json:"confirm_precheck"`
-	ConfirmDrift         bool   `json:"confirm_drift"`
-	ConfirmBeforeMigrate bool   `json:"confirm_before_migrate"`
-	ConfirmAfterMigrate  bool   `json:"confirm_after_migrate"`
+	Target string `json:"target"`
+	Base   string `json:"base"`
+	Stage  string `json:"stage"`
+	// Pending 是停下等待人工确认的点；--continue 只确认它这一个。
+	Pending   string   `json:"pending,omitempty"`
+	Confirmed []string `json:"confirmed,omitempty"`
 }
+
+// 人工确认点。前三个对应 starter-changelog.md 升级说明里的同名小节，drift 是检测到项目改过 starter 文件。
+const (
+	pointPrecheck      = "合并前"
+	pointDrift         = "drift"
+	pointBeforeMigrate = "合并后迁移前"
+	pointAfterMigrate  = "迁移后"
+)
 
 type upgradeOptions struct {
 	version     string
@@ -32,33 +41,27 @@ func runUpgrade(args []string) error {
 	version := flags.String("version", "", "target version")
 	continueRun := flags.Bool("continue", false, "continue after manual steps")
 	projectRoot := flags.String("project-root", ".", "project root")
-	targetRoot := flags.String("target-root", "", "target worktree")
+	targetRoot := flags.String("target-root", "", "target worktree (prepared by scripts/starter-upgrade-entry.sh)")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	if *version == "" {
-		return fmt.Errorf("upgrade: --version is required")
+	if *version == "" || *targetRoot == "" {
+		return fmt.Errorf("upgrade: --version and --target-root are required; run make starter-upgrade")
 	}
 	return upgrade(upgradeOptions{version: *version, continueRun: *continueRun, projectRoot: *projectRoot, targetRoot: *targetRoot})
 }
 
 func upgrade(options upgradeOptions) error {
-	if options.targetRoot == "" {
-		if err := run(options.projectRoot, "git", "fetch", "starter", "--tags"); err != nil {
-			return err
-		}
-		temp, err := os.MkdirTemp("", "starter-target-")
-		if err != nil {
-			return err
-		}
-		defer func() { _ = os.RemoveAll(temp) }()
-		options.targetRoot = filepath.Join(temp, "target")
-		if err := run(options.projectRoot, "git", "worktree", "add", "--detach", options.targetRoot, options.version); err != nil {
-			return err
-		}
-		defer func() { _ = run(options.projectRoot, "git", "worktree", "remove", "--force", options.targetRoot) }()
+	gitDir := func(name string) (string, error) { return gitPath(options.projectRoot, name) }
+	statePath, err := gitDir("starter-upgrade/state.json")
+	if err != nil {
+		return err
 	}
-	state, err := loadUpgradeState(options.projectRoot)
+	mergeHead, err := gitDir("MERGE_HEAD")
+	if err != nil {
+		return err
+	}
+	state, err := loadUpgradeState(statePath)
 	if err != nil {
 		return err
 	}
@@ -71,7 +74,7 @@ func upgrade(options upgradeOptions) error {
 		} else if out != "" {
 			return fmt.Errorf("upgrade: initial workspace must be clean")
 		}
-		if _, err := os.Stat(filepath.Join(options.projectRoot, ".git", "MERGE_HEAD")); err == nil {
+		if exists(mergeHead) {
 			return fmt.Errorf("upgrade: initial merge already in progress")
 		}
 		state.Base, err = upgradeBase(options.projectRoot, options.version)
@@ -81,22 +84,36 @@ func upgrade(options upgradeOptions) error {
 		state.Stage = "precheck"
 	}
 	state.Target = options.version
-	if err := saveUpgradeState(options.projectRoot, state); err != nil {
+	if options.continueRun && state.Pending != "" {
+		state.Confirmed = append(state.Confirmed, state.Pending)
+		state.Pending = ""
+	}
+	if err := saveUpgradeState(statePath, state); err != nil {
 		return err
+	}
+	changelog, err := os.ReadFile(filepath.Join(options.targetRoot, "starter-changelog.md"))
+	if err != nil {
+		return err
+	}
+	notes := upgradeNotes(string(changelog), state.Base, state.Target)
+	// stop 在需要人工确认且还没确认时记下停点并返回 true。
+	stop := func(point string, needed bool, message string) (bool, error) {
+		if !needed || slices.Contains(state.Confirmed, point) {
+			return false, nil
+		}
+		state.Pending = point
+		fmt.Println(message)
+		fmt.Println("完成后用 CONTINUE=1 续跑，只确认这一处。")
+		return true, saveUpgradeState(statePath, state)
 	}
 	for {
 		fmt.Printf("升级基线：%s；目标：%s\n", state.Base, state.Target)
 		switch state.Stage {
 		case "precheck":
-			changelog, err := os.ReadFile(filepath.Join(options.targetRoot, "CHANGELOG.md"))
-			if err != nil {
+			printNotes(notes)
+			if stopped, err := stop(pointPrecheck, notes[pointPrecheck] != "", "请先完成升级说明里的“合并前”事项。"); stopped || err != nil {
 				return err
 			}
-			fmt.Println(string(changelog))
-			if strings.Contains(string(changelog), "合并前") && !state.ConfirmPrecheck && !options.continueRun {
-				return nil
-			}
-			state.ConfirmPrecheck = true
 			state.Stage = "drift"
 		case "drift":
 			drift, err := starterFileDrift(options, state.Base)
@@ -108,17 +125,13 @@ func upgrade(options upgradeOptions) error {
 				return err
 			}
 			drift = append(drift, specDrift...)
-			if len(drift) > 0 && !state.ConfirmDrift && !options.continueRun {
-				for _, problem := range drift {
-					fmt.Println(problem)
-				}
-				return nil
+			if stopped, err := stop(pointDrift, len(drift) > 0, "项目改过以下 starter 文件，合并时会以 starter 版本为准，请确认已登记在 project/starter-patches.md：\n"+strings.Join(drift, "\n")); stopped || err != nil {
+				return err
 			}
-			state.ConfirmDrift = true
 			state.Stage = "merge"
 		case "merge":
-			if _, err := os.Stat(filepath.Join(options.projectRoot, ".git", "MERGE_HEAD")); os.IsNotExist(err) {
-				if err := mergeTarget(options.projectRoot, options.version); err != nil {
+			if !exists(mergeHead) {
+				if err := mergeTarget(options.projectRoot, options.version, mergeHead); err != nil {
 					return err
 				}
 			}
@@ -145,8 +158,8 @@ func upgrade(options upgradeOptions) error {
 				return err
 			}
 			if remaining != "" {
-				fmt.Printf("请解决并暂存以下共享/项目文件冲突，然后用 --continue 续跑：\n%s\n", remaining)
-				return nil
+				fmt.Printf("请解决并暂存以下共享/项目文件冲突，然后用 CONTINUE=1 续跑：\n%s\n", remaining)
+				return saveUpgradeState(statePath, state)
 			}
 			state.Stage = "replay"
 		case "replay":
@@ -175,8 +188,8 @@ func upgrade(options upgradeOptions) error {
 					return err
 				}
 			}
-			if _, err := os.Stat(filepath.Join(options.projectRoot, "web/admin/package.json")); err == nil {
-				if _, err := os.Stat(filepath.Join(options.projectRoot, "web/admin/node_modules")); os.IsNotExist(err) {
+			if exists(filepath.Join(options.projectRoot, "web/admin/package.json")) {
+				if !exists(filepath.Join(options.projectRoot, "web/admin/node_modules")) {
 					if err := run(filepath.Join(options.projectRoot, "web/admin"), "pnpm", "install", "--frozen-lockfile"); err != nil {
 						return err
 					}
@@ -189,21 +202,17 @@ func upgrade(options upgradeOptions) error {
 			}
 			state.Stage = "migrate"
 		case "migrate":
-			changelog, err := os.ReadFile(filepath.Join(options.targetRoot, "CHANGELOG.md"))
-			if err != nil {
+			if stopped, err := stop(pointBeforeMigrate, notes[pointBeforeMigrate] != "", "请先完成升级说明里的“合并后迁移前”事项，再执行迁移。"); stopped || err != nil {
 				return err
 			}
-			if strings.Contains(string(changelog), "合并后迁移前") && !state.ConfirmBeforeMigrate && !options.continueRun {
-				return nil
-			}
-			state.ConfirmBeforeMigrate = true
 			if err := run(options.projectRoot, "go", "run", "./cmd/api", "migrate", "up"); err != nil {
 				return err
 			}
-			if strings.Contains(string(changelog), "迁移后") && !state.ConfirmAfterMigrate && !options.continueRun {
-				return nil
+			state.Stage = "after-migrate"
+		case "after-migrate":
+			if stopped, err := stop(pointAfterMigrate, notes[pointAfterMigrate] != "", "请完成升级说明里的“迁移后”事项。"); stopped || err != nil {
+				return err
 			}
-			state.ConfirmAfterMigrate = true
 			state.Stage = "verify"
 		case "verify":
 			if err := run(options.projectRoot, "go", "test", "./..."); err != nil {
@@ -218,44 +227,48 @@ func upgrade(options upgradeOptions) error {
 			}
 			state.Stage = "complete"
 		case "complete":
-			changelog, err := os.ReadFile(filepath.Join(options.targetRoot, "CHANGELOG.md"))
-			if err != nil {
-				return err
+			if n := notes["部署后"]; n != "" {
+				fmt.Println("部署后事项：\n" + n)
 			}
-			fmt.Println(string(changelog))
-			fmt.Printf("升级流程完成：%s。请按升级说明执行部署后事项。\n", state.Target)
-			return saveUpgradeState(options.projectRoot, state)
+			fmt.Printf("升级流程完成：%s。\n", state.Target)
+			return saveUpgradeState(statePath, state)
 		default:
 			return fmt.Errorf("upgrade: unknown stage %s", state.Stage)
 		}
-		if err := saveUpgradeState(options.projectRoot, state); err != nil {
+		if err := saveUpgradeState(statePath, state); err != nil {
 			return err
 		}
 	}
 }
 
-func mergeTarget(root, version string) error {
-	if err := run(root, "git", "merge", version); err != nil {
-		if _, statErr := os.Stat(filepath.Join(root, ".git", "MERGE_HEAD")); os.IsNotExist(statErr) {
-			return err
-		}
+// mergeTarget 合并目标版本；有冲突时 git merge 失败但 MERGE_HEAD 存在，交给后续步骤处理。
+func mergeTarget(root, version, mergeHead string) error {
+	if err := run(root, "git", "merge", version); err != nil && !exists(mergeHead) {
+		return err
 	}
 	return nil
 }
 
+// upgradeBase 是项目已经合并的最新 starter 版本：同时是 HEAD 和目标版本祖先的 tag。业务项目和 starter 共享
+// tag 命名空间，项目自己的 tag（如 v1.0.0）不是目标版本的祖先，不会被选中。没有这样的 tag 时退回 merge-base。
 func upgradeBase(root, target string) (string, error) {
 	out, err := gitOutput(root, "tag", "--merged", "HEAD", "--sort=-v:refname")
 	if err != nil {
 		return "", err
 	}
 	for _, tag := range strings.Fields(out) {
-		if tag != target {
+		if tag == target {
+			continue
+		}
+		if exec.Command("git", "-C", root, "merge-base", "--is-ancestor", tag, target).Run() == nil {
 			return tag, nil
 		}
 	}
 	return gitOutput(root, "merge-base", "HEAD", target)
 }
 
+// starterFileDrift 列出项目相对基线改过、且和目标版本也不一样的 starter 文件：合并时它们会被 starter 版本覆盖，
+// 项目的改动会丢。内容已经和目标版本相同的（例如提前同步了上游的修复）合并不会丢任何东西，不算漂移。
 func starterFileDrift(options upgradeOptions, base string) ([]string, error) {
 	removed, err := removedModules(options.projectRoot)
 	if err != nil {
@@ -271,16 +284,23 @@ func starterFileDrift(options upgradeOptions, base string) ([]string, error) {
 		if err != nil {
 			return nil, err
 		}
-		if changed != "" {
+		if changed == "" {
+			continue
+		}
+		differsFromTarget, err := gitOutput(options.projectRoot, "diff", "--name-only", options.version, "--", path)
+		if err != nil {
+			return nil, err
+		}
+		if differsFromTarget != "" {
 			out = append(out, changed)
 		}
 	}
 	return out, nil
 }
 
-func loadUpgradeState(root string) (upgradeState, error) {
+func loadUpgradeState(path string) (upgradeState, error) {
 	var state upgradeState
-	data, err := os.ReadFile(filepath.Join(root, ".git", "starter-upgrade", "state.json"))
+	data, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
 		return state, nil
 	}
@@ -290,16 +310,32 @@ func loadUpgradeState(root string) (upgradeState, error) {
 	return state, json.Unmarshal(data, &state)
 }
 
-func saveUpgradeState(root string, state upgradeState) error {
-	dir := filepath.Join(root, ".git", "starter-upgrade")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+func saveUpgradeState(path string, state upgradeState) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
 	data, err := json.MarshalIndent(state, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(dir, "state.json"), append(data, '\n'), 0o644)
+	return os.WriteFile(path, append(data, '\n'), 0o644)
+}
+
+// gitPath 是 git 目录里的路径；项目根是 git worktree 时 .git 是文件，不能直接拼接。
+func gitPath(root, name string) (string, error) {
+	p, err := gitOutput(root, "rev-parse", "--git-path", name)
+	if err != nil {
+		return "", err
+	}
+	if !filepath.IsAbs(p) {
+		p = filepath.Join(root, p)
+	}
+	return p, nil
+}
+
+func exists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }
 
 func gitOutput(root string, args ...string) (string, error) {

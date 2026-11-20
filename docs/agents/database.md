@@ -175,7 +175,7 @@
 ## 表归属
 
 每张业务表属于且只属于一个模块，登记在该模块的 `postgres/tables.go`
-（如 `internal/modules/auth/postgres/tables.go`）：`var Tables = []string{...}`，必须是
+（如 `internal/modules/user/postgres/tables.go`）：`var Tables = []string{...}`，必须是
 字符串字面量。为什么：模块随时可能拆到独立的数据库，一条 JOIN 了别人表的 SQL 在拆分时
 才暴露，代价最大。`internal/archtest/tables_test.go` 检查：
 
@@ -264,7 +264,7 @@
 ## 写 Repository
 
 - 实现放在 `internal/modules/<m>/postgres/`，接口在 `domain/ports.go`。一个聚合一个文件：
-  只有一个 Repository 的模块写在 `repository.go`；auth 按聚合拆成 `repository.go`（users）、
+  只有一个 Repository 的模块写在 `repository.go`；user 按聚合拆成 `repository.go`（users）、
   `identity.go`、`session.go`、`openid.go`、`state.go`。
 - 一律经 `handle.Resolve(ctx)` 取连接（需要具体 `pgx.Tx` 时用 `ResolveTx`），不持有
   `*pgxpool.Pool`：`dbtx.Handle` 把 pool 做成私有字段，在编译期保证 Repository
@@ -275,7 +275,7 @@
 - **竞态敏感的判断写进同一条 SQL**，不要先 SELECT 再 UPDATE：
   扣库存用 `UPDATE ... WHERE stock >= $1` 看 `RowsAffected()`；状态机用
   `WHERE status = 'pending'`；去重用 `INSERT ... ON CONFLICT DO NOTHING`；读完就删的
-  临时数据用 `DELETE ... WHERE ... RETURNING`（`internal/modules/auth/postgres/state.go` 的
+  临时数据用 `DELETE ... WHERE ... RETURNING`（`internal/modules/user/postgres/state.go` 的
   `Take`），读完要留痕的用 `UPDATE ... RETURNING`。RowsAffected 为 0 时，只在失败路径多查
   一次来区分“不存在”和“条件不满足”。
 - **后台编辑整份表单的表用乐观锁**：加 `version BIGINT NOT NULL DEFAULT 1`，编辑用
@@ -290,7 +290,7 @@
   `Range`、`Contains`，值为空的条件不加，查询计划才能用上索引；`Contains` 内部用
   `ContainsPattern` 转义 `%` `_`），内部用 `LIMIT/OFFSET` 取一页、`CountCapped` 数总数（最多
   数到 10000，多数一行判断是否超过），起始位置由 `page.New` 限制在前 10000 条内。参考
-  `internal/modules/auth/postgres/repository.go` 的 `List`，生成器生成的 Repository 也是这样；
+  `internal/modules/user/postgres/repository.go` 的 `List`，生成器生成的 Repository 也是这样；
 - 其余列表分页用 cursor（`created_at + id`，`internal/platform/postgres/pagination.go`），
   不用 offset；多取一行判断是否有下一页；`limit` 在 Repository 里再兜底一次，cursor
   解析失败返回模块自己的 `ErrInvalidCursor`（4xx）。cursor 里的 id 也是外部输入，
@@ -300,7 +300,7 @@
 ## Repository 契约测试
 
 每个 Repository 接口一套契约用例，定义在模块的 `domain/domaintest/`：只有一个 Repository
-的模块是 `contract.go` 的 `RunRepositoryContract`；auth 另有 `contract_login.go` 的
+的模块是 `contract.go` 的 `RunRepositoryContract`；user 另有 `contract_login.go` 的
 `RunIdentityRepositoryContract`、`RunSessionRepositoryContract`、`RunOAuthStateRepositoryContract`。
 同一套用例跑两遍：
 
@@ -331,15 +331,24 @@
 
 不要用 `TESTCONTAINERS_RYUK_DISABLED=true` 绕过 ryuk 起不来的问题：`pgtest` 的容器靠 ryuk
 清理，没有 ryuk，测试结束后 Postgres 容器和匿名卷都不会被清理。只跑部分包：
-`scripts/test-integration.sh ./internal/modules/auth/...`；带值的 `go test` 参数写成
+`scripts/test-integration.sh ./internal/modules/user/...`；带值的 `go test` 参数写成
 `-run=X` 这种形式（脚本把 `./`、`../` 开头的参数当作包）。
 
 ## 缓存
 
-- 只有真的有热点读的模块才接缓存，接口定义在模块自己的 `domain/ports.go`
-  （参考 `internal/modules/<m>/domain/ports.go` 的 `Cache`）；
-- 实现用 `internal/platform/cache` 的泛型 `RedisCache[T]` / `NoopCache[T]`，在
-  `module.go` 里按是否配置了 Redis 选择；
+- 缓存是现成能力，目前没有模块接入；只有真的有热点读的模块才接。端口由模块自己在 `domain/ports.go` 定义，
+  方法签名与 `internal/platform/cache` 一致即可直接满足：
+
+  ```go
+  type Cache interface {
+  	Get(ctx context.Context, id string) (*Product, bool, error)
+  	Set(ctx context.Context, id string, v *Product, ttl time.Duration) error
+  	Delete(ctx context.Context, id string) error
+  }
+  ```
+
+- 实现用 `internal/platform/cache` 的泛型 `RedisCache[T]` / `NoopCache[T]`，在 `module.go` 里按是否配置了
+  Redis 选择（`cache.NewRedisCache[T](client, "<模块>", logger)` 或 `cache.NewNoopCache[T]()`）；
 - key 必须是 `cache:<模块>:<id>`：限流也用同一个 Redis（`ratelimit:<规则>:<标识>`），
   不隔离会撞 key；
 - 失效顺序固定为先写 DB、再删缓存（用 Delete，不用 Set 覆写）；删缓存一律包在

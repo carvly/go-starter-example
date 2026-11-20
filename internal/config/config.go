@@ -79,7 +79,7 @@ type DBConfig struct {
 	HealthCheckPeriod time.Duration `yaml:"health_check_period"`
 }
 
-// RedisConfig 的 Addr 为空时不连 Redis：商品不缓存、限流按进程内存计数。
+// RedisConfig 的 Addr 为空时不连 Redis：缓存退回 Noop、限流按进程内存计数。
 type RedisConfig struct {
 	Addr     string `yaml:"addr"`
 	Password string `yaml:"password"`
@@ -135,7 +135,8 @@ func Load() (*Config, error) {
 	return cfg, nil
 }
 
-// LoadDB 只加载迁移和队列命令需要的数据库配置，不校验业务模块。
+// LoadDB 只加载迁移命令需要的数据库配置，不校验业务模块。数据库配置的解析与 Load 是同一条路径
+// （配置段 db + applyDBEnv），只是不读其余部分。
 func LoadDB() (DBConfig, error) {
 	src, err := loadSource()
 	if err != nil {
@@ -145,8 +146,8 @@ func LoadDB() (DBConfig, error) {
 	if err := src.Section("db", &cfg); err != nil {
 		return DBConfig{}, err
 	}
-	if err := src.Env("DB_DSN", &cfg.DSN); err != nil {
-		return DBConfig{}, err
+	if err := applyDBEnv(&cfg); err != nil {
+		return DBConfig{}, fmt.Errorf("config: %w", err)
 	}
 	if cfg.DSN == "" {
 		return DBConfig{}, fmt.Errorf("config: missing required env var(s): DB_DSN")
@@ -197,7 +198,6 @@ func applyEnvOverrides(cfg *Config) error {
 	setString(&cfg.HTTP.AdminAddr, "HTTP_ADMIN_ADDR")
 	setString(&cfg.HTTP.AdminOrigin, "HTTP_ADMIN_ORIGIN")
 	setStringSlice(&cfg.CORS.AllowOrigins, "CORS_ALLOW_ORIGINS")
-	setString(&cfg.DB.DSN, "DB_DSN")
 	setString(&cfg.Redis.Addr, "REDIS_ADDR")
 	setString(&cfg.Redis.Password, "REDIS_PASSWORD")
 	return errors.Join(
@@ -207,13 +207,21 @@ func applyEnvOverrides(cfg *Config) error {
 		setBool(&cfg.HTTP.TrustedProxy, "HTTP_TRUSTED_PROXY"),
 		setBool(&cfg.HTTP.APIDocsEnabled, "HTTP_API_DOCS_ENABLED"),
 		setFloat64(&cfg.HTTP.GlobalRateLimitPerSecond, "HTTP_GLOBAL_RATE_LIMIT_PER_SECOND"),
-		setInt32(&cfg.DB.MinConns, "DB_MIN_CONNS"),
-		setInt32(&cfg.DB.MaxConns, "DB_MAX_CONNS"),
-		setDuration(&cfg.DB.MaxConnLifetime, "DB_MAX_CONN_LIFETIME"),
-		setDuration(&cfg.DB.HealthCheckPeriod, "DB_HEALTH_CHECK_PERIOD"),
+		applyDBEnv(&cfg.DB),
 		setUint32(&cfg.Argon2.MemoryKiB, "ARGON2_MEMORY_KIB"),
 		setUint32(&cfg.Argon2.Iterations, "ARGON2_ITERATIONS"),
 		setUint8(&cfg.Argon2.Parallelism, "ARGON2_PARALLELISM"),
+	)
+}
+
+// applyDBEnv 是数据库配置的环境变量覆盖，Load 与 LoadDB 共用。
+func applyDBEnv(db *DBConfig) error {
+	setString(&db.DSN, "DB_DSN")
+	return errors.Join(
+		setInt32(&db.MinConns, "DB_MIN_CONNS"),
+		setInt32(&db.MaxConns, "DB_MAX_CONNS"),
+		setDuration(&db.MaxConnLifetime, "DB_MAX_CONN_LIFETIME"),
+		setDuration(&db.HealthCheckPeriod, "DB_HEALTH_CHECK_PERIOD"),
 	)
 }
 
@@ -238,7 +246,7 @@ func validate(cfg *Config) error {
 	// golang.org/x/crypto/argon2 会在第一次真正调用哈希时 panic
 	// （"number of rounds too small"/"parallelism degree too low"）——
 	// 那时候已经是运行期，会被 Recover 中间件接住变成每个
-	// 登录/注册请求的 500，而不是启动时就报错退出。这类配置错误必须
+	// 需要哈希密码的请求（员工登录、改密）的 500，而不是启动时就报错退出。这类配置错误必须
 	// 在这里挡住，跟其它必需字段缺失是同一类"启动时就要炸出来"的要求。
 	if cfg.Argon2.Iterations < 1 {
 		return fmt.Errorf("config: ARGON2_ITERATIONS must be >= 1, got %d", cfg.Argon2.Iterations)
@@ -247,17 +255,17 @@ func validate(cfg *Config) error {
 		return fmt.Errorf("config: ARGON2_PARALLELISM must be >= 1, got %d", cfg.Argon2.Parallelism)
 	}
 
-	// HTTP_BODY_LIMIT_BYTES 被手滑设成 0（或负数）时，Echo 的 BodyLimit
-	// 中间件会把"body 太大"的判断变成"任何带 body 的请求都超限"——
-	// server.go 里 GlobalRateLimitPerSecond/RequestTimeout 那两个同类
-	// 配置项遇到 <= 0 会静默回落到一个默认值，但 BodyLimit 不能照搬
-	// 那个模式：那两项零值只是退化成"用默认限流/超时"，这一项的零值
-	// 却是让注册/登录/创建商品/下单这些带 body 的写路径全部返回 413，
-	// 服务本身看起来正常启动、健康检查也正常（健康检查是 GET，不带
-	// body），故障只在真正发起写请求时才会暴露——这类"配错了但看起来
-	// 正常运行"的风险必须在启动时就挡住，跟 Argon2 参数是同一类要求。
+	// 下面三项的零值或负数会让服务"看起来正常启动、健康检查也正常"，故障只在真实请求时暴露
+	// （BodyLimit 让所有带 body 的写请求 413；限流额度和请求超时没有合理的零值），所以在启动时挡住。
+	// 默认值只在 defaults() 一处，下游不再各自回落。
 	if cfg.HTTP.BodyLimitBytes <= 0 {
 		return fmt.Errorf("config: HTTP_BODY_LIMIT_BYTES must be > 0, got %d", cfg.HTTP.BodyLimitBytes)
+	}
+	if cfg.HTTP.GlobalRateLimitPerSecond <= 0 {
+		return fmt.Errorf("config: HTTP_GLOBAL_RATE_LIMIT_PER_SECOND must be > 0, got %v", cfg.HTTP.GlobalRateLimitPerSecond)
+	}
+	if cfg.HTTP.RequestTimeout <= 0 {
+		return fmt.Errorf("config: HTTP_REQUEST_TIMEOUT must be > 0, got %s", cfg.HTTP.RequestTimeout)
 	}
 	if cfg.HTTP.AdminAddr != "" && cfg.HTTP.AdminAddr == cfg.HTTP.Addr {
 		return fmt.Errorf("config: HTTP_ADMIN_ADDR must differ from HTTP_ADDR (%q): the admin server is a separate listener", cfg.HTTP.Addr)

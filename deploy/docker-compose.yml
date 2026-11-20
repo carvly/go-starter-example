@@ -18,9 +18,9 @@
 # 同名变量做替换。
 
 # 前台登录的配置。微信各入口默认不启用，要用哪个入口就在 .env 里配上它的 appid 和
-# secret；AUTH_PUBLIC_BASE_URL 要和微信侧配置的回调域名一致。
-x-auth-env: &auth-env
-  AUTH_PUBLIC_BASE_URL: ${AUTH_PUBLIC_BASE_URL:-http://localhost:8080}
+# secret；USER_PUBLIC_BASE_URL 要和微信侧配置的回调域名一致。
+x-user-env: &user-env
+  USER_PUBLIC_BASE_URL: ${USER_PUBLIC_BASE_URL:-http://localhost:8080}
   WECHAT_WEB_APP_ID: ${WECHAT_WEB_APP_ID:-}
   WECHAT_WEB_SECRET: ${WECHAT_WEB_SECRET:-}
   WECHAT_MP_APP_ID: ${WECHAT_MP_APP_ID:-}
@@ -52,7 +52,7 @@ services:
           cpus: "1"
           memory: 512M
 
-  # 默认不连 Redis（商品不缓存、限流按进程内存计数）。需要时
+  # 默认不连 Redis（缓存退回 Noop、限流按进程内存计数）。需要时
   # 取消注释，并给 api/worker 补 REDIS_ADDR=redis:6379 环境变量。
   # redis:
   #   image: redis:8-alpine
@@ -102,7 +102,7 @@ services:
       # DEV-ONLY 默认值，生产环境必须覆盖（见上面文件头的说明）。
       JWT_SIGNING_KEY: ${JWT_SIGNING_KEY:-dev-only-signing-key-change-me}
       JWT_KEY_ID: ${JWT_KEY_ID:-dev}
-      <<: *auth-env
+      <<: *user-env
       # 后台：页面和 /admin/v1 都在这个端口上，浏览器打开 http://localhost:8081。首个管理员用
       # `docker compose -f deploy/docker-compose.yml run --rm api staff create -username root` 创建。
       # 只发布到宿主机的 127.0.0.1：后台不该暴露在公网入口上，远程访问经 HTTPS 反代，
@@ -142,7 +142,7 @@ services:
       DB_DSN: postgres://${POSTGRES_USER:-app}:${POSTGRES_PASSWORD:-app}@postgres:5432/${POSTGRES_DB:-app}?sslmode=disable
       JWT_SIGNING_KEY: ${JWT_SIGNING_KEY:-dev-only-signing-key-change-me}
       JWT_KEY_ID: ${JWT_KEY_ID:-dev}
-      <<: *auth-env
+      <<: *user-env
     # 内部健康检查/指标端口不发布到宿主机——健康状态靠
     # HEALTHCHECK 走容器内部探测，不需要从宿主机访问这个端口。
     healthcheck:
@@ -162,7 +162,7 @@ volumes:
 
 # ---- Podman 说明 ----
 # 已在 Podman 5.8 rootless + SELinux enforcing（Fedora）+ podman-compose 1.6 上验证：
-# 栈能起来，下单后 worker 把订单确认为 confirmed。注意：
+# 栈能起来，worker 健康并执行定时任务。注意：
 #
 # - `podman compose` 只是转发给 compose 实现：装了 docker-compose 就用它（经 Podman 的
 #   API socket），否则用 podman-compose。

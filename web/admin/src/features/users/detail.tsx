@@ -9,7 +9,7 @@ import { DescriptionItem, DescriptionList } from "@/components/overlay";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { toast } from "@/components/ui/toast";
-import { useCan } from "@/features/auth/queries";
+import { useCan } from "@/lib/session";
 import { formatDateTime } from "@/lib/format";
 
 import { UserActions } from "./actions";

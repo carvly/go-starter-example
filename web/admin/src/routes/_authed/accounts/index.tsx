@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { Users } from "lucide-react";
 
-import { page } from "@/features/auth/guard";
+import { page } from "@/lib/guard";
 import { AccountsPage } from "@/features/staff/accounts-page";
 
 export const Route = createFileRoute("/_authed/accounts/")({
